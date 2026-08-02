@@ -1,0 +1,9 @@
+python -m pip install -r requirements.txt
+
+python isles26.py init --raw-root "/path/to/ATLAS_R2.1_raw"
+python isles26.py doctor --create-dirs --require-raw
+python isles26.py prepare --dry-run
+python isles26.py prepare
+python isles26.py preprocess
+python isles26.py train debug
+python isles26.py train baseline
