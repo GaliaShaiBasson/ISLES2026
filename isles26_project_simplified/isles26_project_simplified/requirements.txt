@@ -1,8 +1,0 @@
-# Install a hardware-appropriate PyTorch build first.
-# nnU-Net currently recommends PyTorch 2.8.x or lower.
-nnunetv2==2.8.1
-nibabel>=5.0,<6
-numpy>=1.24
-scipy>=1.11
-pandas>=2.0
-matplotlib>=3.7
