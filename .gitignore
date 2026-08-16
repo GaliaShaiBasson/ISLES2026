@@ -1,0 +1,33 @@
+# nnU-Net data & results (large, not source-controllable)
+nnUNet_raw/
+nnUNet_preprocessed/
+nnUNet_results/
+
+# Raw/encrypted dataset archives and extracted downloads
+*.tar.gz
+ATLAS*/
+data/project_debug_data
+
+# Generated outputs
+results.csv
+results_baseline.csv
+summary_by_experiment.csv
+summary_by_size_bin.csv
+case_metadata.csv
+figures/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
