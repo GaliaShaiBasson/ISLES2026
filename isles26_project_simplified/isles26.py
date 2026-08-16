@@ -51,20 +51,41 @@ DEFAULTS = {
 }
 
 TRAINER_GROUPS = {
-    "baseline": ["nnUNetTrainer"],
+    # All real-experiment trainers below share a 250-epoch budget (down from
+    # nnU-Net's 1000-epoch default) so the study fits the available GPU time.
+    # Every condition uses the same budget so the baseline/loss/sampling
+    # comparison stays controlled. See PROJECT_PLAN.md.
+    "baseline": ["nnUNetTrainer_250epochs"],
     "losses": [
-        "nnUNetTrainerDiceOnly",
-        "nnUNetTrainerFocal",
-        "nnUNetTrainerTversky",
-        "nnUNetTrainerFocalTversky",
+        "nnUNetTrainerDiceOnly_250epochs",
+        "nnUNetTrainerFocal_250epochs",
+        "nnUNetTrainerTversky_250epochs",
+        "nnUNetTrainerFocalTversky_250epochs",
     ],
-    "dice": ["nnUNetTrainerDiceOnly"],
-    "focal": ["nnUNetTrainerFocal"],
-    "tversky": ["nnUNetTrainerTversky"],
-    "focal-tversky": ["nnUNetTrainerFocalTversky"],
-    "sampling": ["nnUNetTrainerLesionAwareSampling"],
+    "dice": ["nnUNetTrainerDiceOnly_250epochs"],
+    "focal": ["nnUNetTrainerFocal_250epochs"],
+    "tversky": ["nnUNetTrainerTversky_250epochs"],
+    "focal-tversky": ["nnUNetTrainerFocalTversky_250epochs"],
+    "sampling": ["nnUNetTrainerLesionAwareSampling_250epochs"],
     "debug": ["nnUNetTrainerDebugFast"],
 }
+
+
+# TRAINER_GROUPS = {
+#     "baseline": ["nnUNetTrainer"],
+#     "losses": [
+#         "nnUNetTrainerDiceOnly",
+#         "nnUNetTrainerFocal",
+#         "nnUNetTrainerTversky",
+#         "nnUNetTrainerFocalTversky",
+#     ],
+#     "dice": ["nnUNetTrainerDiceOnly"],
+#     "focal": ["nnUNetTrainerFocal"],
+#     "tversky": ["nnUNetTrainerTversky"],
+#     "focal-tversky": ["nnUNetTrainerFocalTversky"],
+#     "sampling": ["nnUNetTrainerLesionAwareSampling"],
+#     "debug": ["nnUNetTrainerDebugFast"],
+# }
 
 
 def _strip_quotes(value: str) -> str:
@@ -250,8 +271,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if installed:
         discovery_code = (
             "from nnunetv2.utilities.find_objects import recursive_find_trainer_class_by_name as f;"
-            "names=['nnUNetTrainerDebugFast','nnUNetTrainerFocalTversky',"
-            "'nnUNetTrainerLesionAwareSampling'];"
+            "names=['nnUNetTrainerDebugFast','nnUNetTrainerFocalTversky_250epochs',"
+            "'nnUNetTrainerLesionAwareSampling_250epochs'];"
             "[f(n) for n in names];print('custom trainer discovery OK')"
         )
         result = subprocess.run(
@@ -364,7 +385,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         cmd_preprocess(preprocess_args)
 
     trainers = [args.trainer] if args.trainer else TRAINER_GROUPS[args.experiment]
-    if "nnUNetTrainerLesionAwareSampling" in trainers:
+    if any(trainer.startswith("nnUNetTrainerLesionAwareSampling") for trainer in trainers):
         metadata = Path(env["ISLES26_CASE_METADATA_CSV"])
         if not metadata.is_file() and not args.print_only:
             raise SystemExit(f"Sampling metadata is missing: {metadata}. Run `python isles26.py prepare` first.")

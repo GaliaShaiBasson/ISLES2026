@@ -74,3 +74,11 @@ class nnUNetTrainerLesionAwareSampling(nnUNetTrainer):
             f"[LesionAwareSampling] active for {sampled_case_count} training cases; validation remains uniform."
         )
         return train_loader, validation_loader
+
+
+class nnUNetTrainerLesionAwareSampling_250epochs(nnUNetTrainerLesionAwareSampling):
+    """Same lesion-aware sampling, rescaled to the project-wide 250-epoch budget."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_epochs = 250

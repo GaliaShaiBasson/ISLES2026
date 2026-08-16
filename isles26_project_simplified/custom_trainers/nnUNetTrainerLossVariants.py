@@ -51,3 +51,33 @@ class nnUNetTrainerFocalTversky(nnUNetTrainer):
             self,
             FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=0.75, ignore_index=_ignore_label(self)),
         )
+
+
+class _Epochs250Mixin:
+    """Rescales the poly-LR schedule to a 250-epoch budget instead of nnU-Net's default 1000.
+
+    Mirrors nnunetv2's own ``nnUNetTrainer_250epochs`` convention: only
+    ``num_epochs`` changes, so the schedule shape (SGD + PolyLRScheduler) is
+    preserved, just compressed. Applied identically to every loss variant so
+    the cross-condition comparison stays controlled.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.num_epochs = 250
+
+
+class nnUNetTrainerDiceOnly_250epochs(_Epochs250Mixin, nnUNetTrainerDiceOnly):
+    pass
+
+
+class nnUNetTrainerFocal_250epochs(_Epochs250Mixin, nnUNetTrainerFocal):
+    pass
+
+
+class nnUNetTrainerTversky_250epochs(_Epochs250Mixin, nnUNetTrainerTversky):
+    pass
+
+
+class nnUNetTrainerFocalTversky_250epochs(_Epochs250Mixin, nnUNetTrainerFocalTversky):
+    pass
