@@ -1,5 +1,9 @@
 # Execution plan
 
+See `CLAUDE.md` for the running decisions log (why things deviate from
+nnU-Net/project defaults) and working agreement. Update both when a plan step
+here changes as a result of a new decision.
+
 ## Phase 0 — Verify the environment
 
 ```bash
@@ -10,6 +14,18 @@ python isles26.py prepare --dry-run
 
 Inspect several discovered image/mask pairs manually before writing the dataset.
 
+## Phase 0.5 — Split the data (train/val/test_id/test_ood)
+
+```bash
+python data_prep/split_dataset.py --raw-root "/path/to/ATLAS_R3.0_raw" --out-dir workspace/splits
+```
+
+Replaces nnU-Net's default unstratified random 5-fold CV with a single fixed
+split, stratified by lesion-size bin, plus an out-of-distribution test set
+made of entire held-out sites — see `CLAUDE.md` decisions log for why. Do not
+proceed to `prepare` until `broken_cases.csv` from this step is small/stable
+(i.e. the raw-data upload/transfer has actually finished).
+
 ## Phase 1 — Build and smoke-test the baseline
 
 ```bash
@@ -19,7 +35,8 @@ python isles26.py train debug
 python isles26.py train baseline
 ```
 
-The debug run is a pipeline check only. Use the same fold and configuration for every real comparison.
+The debug run is a pipeline check only. Use the same fold, configuration, and
+250-epoch budget for every real comparison (see `CLAUDE.md`).
 
 ## Phase 2 — Loss study
 
