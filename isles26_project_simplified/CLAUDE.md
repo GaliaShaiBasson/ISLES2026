@@ -37,6 +37,24 @@ together. Cross-reference rather than duplicate.
 
 Newest first. Each entry: decision, rationale, where it's implemented.
 
+### Split finalized (2026-08-17): 1,284/1,284 usable, OOD sites locked
+
+- **OOD site list locked**: `R005, R008, R027, R029, R042, R070` (6 sites,
+  n=129). Written into `data_prep/split_dataset.py` as `LOCKED_OOD_SITES`
+  and used by default; pass `--ood-sites search` to fall back to the
+  randomized search, or `--ood-sites A,B,C` to override explicitly. Locked
+  rather than re-derived each run so later experiments are measured against
+  the same held-out sites even if the script or search logic changes.
+- **Final split sizes**: train=898 (48 sites), val=128 (37 sites),
+  test_id=129 (37 sites), test_ood=129 (6 sites). Size-bin balance ~33/33/33
+  large/medium/small in every split.
+- **Empty-lesion cases (n=3 dataset-wide)**: all 3 landed in `train` (merged
+  into the "small" bin for split mechanics only, since 3 is too few to
+  survive a second stratified split as its own class). Left as-is rather
+  than hand-moved into test — n=3 is too small to support a real
+  empty-prediction conclusion either way.
+- Output: `workspace/splits/{train,val,test_id,test_ood,manifest,broken_cases}.csv`.
+
 ### Custom stratified train/val/test_id/test_ood split (replaces nnU-Net's default 5-fold CV)
 
 - **Decision:** Do not rely on nnU-Net's built-in `do_split()` (plain
@@ -66,7 +84,8 @@ Newest first. Each entry: decision, rationale, where it's implemented.
   train with 1–2 flowing into test naturally via their site's OOD/ID
   assignment, to support the empty-prediction/false-positive reporting
   `PROJECT_REVIEW.md` already calls for.
-- **Implemented in:** `data_prep/split_dataset.py`.
+- **Implemented in:** `data_prep/split_dataset.py`. Finalized against the
+  complete raw upload — see entry above for locked OOD sites and split sizes.
 - **Still pending (not yet implemented):**
   1. Wire the split into `prepare_isles26_dataset.py` so only `train`+`val`
      case IDs are ever copied into `imagesTr` — `test_id`/`test_ood` must
@@ -76,9 +95,6 @@ Newest first. Each entry: decision, rationale, where it's implemented.
      and place it in `nnUNet_preprocessed/DatasetXXX_.../` before training,
      so nnU-Net's `fold 0` uses our stratified split instead of generating
      its own unstratified random one.
-  3. Do not treat any split as final until the raw-data upload is confirmed
-     complete (see next entry) — rerun `split_dataset.py` after upload
-     finishes.
 
 ### Raw-data integrity validation before use
 
