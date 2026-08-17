@@ -37,6 +37,42 @@ together. Cross-reference rather than duplicate.
 
 Newest first. Each entry: decision, rationale, where it's implemented.
 
+### Optimizing GPU usage: investigated, no free lever found -- leave as-is (2026-08-18)
+
+- **Context:** GPU is an L40S, 46 GB VRAM. Live during the 500-epoch/dataset002 run:
+  99% compute utilization but only ~8.6 GB (~19%) VRAM used. Looked like real
+  headroom being left on the table. Two concrete ways to use it were tested --
+  both came back net negative, not free.
+- **Bigger patch/batch on the same architecture (`-gpu_memory_target`):**
+  previewed via `nnUNetv2_plan_experiment -d 2 -gpu_memory_target 32
+  -overwrite_plans_name nnUNetPlansPreview32GB` (isolated -- never touched the
+  live `nnUNetPlans.json` the running job was reading). Result: patch grows
+  128x128x128 -> 160x192x160 (2.34x) and batch grows 2 -> 4 (2x) = **~4.69x
+  more voxels processed per iteration**. GPU compute is already the bottleneck
+  (99% util at the current small config), so this is expected to cost close to
+  a proportional ~4.7x in wall-clock, turning tonight's ~18h estimate for 4
+  conditions into ~80+ hours. Same order of magnitude as switching to
+  ResEncL/XL (see the existing entry below) -- there's no cheap version of
+  "use more memory," because the extra memory only exists to hold more compute.
+- **Running two conditions concurrently on the same GPU:** a quick 5-epoch/
+  20-iteration 2D debug-trainer test alongside `baseline-500` initially showed
+  *no* measurable slowdown during its training phase, suggesting real idle
+  compute headroom -- but that job was too small/short to be trustworthy.
+  Re-tested at real scale: ran `baseline-500` and `focal-tversky-500`
+  concurrently for ~12 minutes (both real 3d_fullres jobs). Result:
+  `baseline-500` went from 30.3s/epoch solo to 63-65s/epoch concurrent (~2.1x
+  slower); `focal-tversky-500` ran at 71-80s/epoch concurrent (vs. ~32s/epoch
+  solo from the earlier 250-epoch run, ~2.3x slower). Net: finishing both
+  conditions sequentially (~8.6h) is *faster* than running them concurrently
+  (~10.4h, bounded by the slower of the two) -- concurrency is a genuine net
+  loss here, not a free lunch, because the GPU's compute is actually saturated
+  by one real job even though VRAM isn't.
+- **Conclusion:** the unused VRAM is real but not spendable for free by any
+  method tried. Don't revisit this speculatively -- only reopen it if
+  architecture change (ResEnc, see below) becomes the actual next research
+  question, at which point the cost is a real tradeoff to weigh, not a bug to
+  fix.
+
 ### Backfill complete: full val/test_id/test_ood coverage for all 6 conditions (2026-08-17)
 
 - Ran the deferred baseline/dice/focal held-out predict+evaluate once the
