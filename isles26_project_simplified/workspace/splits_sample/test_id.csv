@@ -1,0 +1,7 @@
+case_id,center,lesion_volume_mm3,size_bin
+ATLAS_r038s084_ses1,R038,26672.0,large
+ATLAS_r064s008_ses1,R064,133626.0,large
+ATLAS_r028s014_ses1,R028,6136.999634206295,medium
+ATLAS_r028s017_ses1,R028,2540.0,medium
+ATLAS_r010s026_ses1,R010,663.0,small
+ATLAS_r009s035_ses1,R009,27.997222900390625,small
