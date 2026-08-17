@@ -221,15 +221,33 @@ def choose_site_pool(
     return sorted(best[1])
 
 
-def carve_final_holdout_id(pool: pd.DataFrame, frac: float, seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+def carve_final_holdout_id(
+    pool: pd.DataFrame, frac: float, seed: int, excluded_sites: list[str] | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Stratified-by-size-bin subject-level sample, held out from the same site pool
-    as train/val/test_id/test_ood -- the "in-distribution" half of the hidden final
-    holdout. Returns (final_holdout_id_df, remaining_pool_df).
+    as train/val/test_id -- the "in-distribution" half of the hidden final holdout.
+
+    ``excluded_sites`` (the dev-time OOD sites, e.g. LOCKED_OOD_SITES) must never be
+    eligible for this sample: an "in-distribution" case is only meaningful if it
+    comes from a site the model actually trains on. Without this, the ID carve was
+    blind to which sites become test_ood and could (did, in practice -- 7/64 cases in
+    the 1,453-case split) draw cases from OOD-reserved sites, silently mislabeling
+    them "in-distribution" -- see CLAUDE.md. Excluded-site cases are passed straight
+    through to ``remaining_pool_df`` untouched, where the caller's own OOD-site
+    assignment (stratified_split) still correctly routes them to test_ood.
+
+    Returns (final_holdout_id_df, remaining_pool_df).
     """
     from sklearn.model_selection import train_test_split
 
-    strat_bin = pool["size_bin"].replace("empty", "small")
-    remaining, holdout = train_test_split(pool, test_size=frac, stratify=strat_bin, random_state=seed)
+    excluded = set(excluded_sites or [])
+    eligible = pool[~pool["center"].isin(excluded)].copy()
+    ineligible = pool[pool["center"].isin(excluded)].copy()
+
+    strat_bin = eligible["size_bin"].replace("empty", "small")
+    remaining, holdout = train_test_split(eligible, test_size=frac, stratify=strat_bin, random_state=seed)
+    if not ineligible.empty:
+        remaining = pd.concat([remaining, ineligible]).sort_index()
     return holdout, remaining
 
 
@@ -451,6 +469,7 @@ def main() -> int:
     # --- Stage 1: carve out the hidden final holdout FIRST, before anything else ever
     # sees these cases. This project's stand-in for the real (never-received) ISLES'26
     # challenge test set -- see module docstring.
+    ood_sites: list[str] | None = None
     if args.skip_final_holdout:
         final_holdout_ood_df = usable.iloc[0:0].copy()
         final_holdout_id_df = usable.iloc[0:0].copy()
@@ -475,28 +494,48 @@ def main() -> int:
         final_holdout_ood_df = usable[usable["center"].isin(final_holdout_ood_sites)].copy()
         pool_after_ood = usable[~usable["center"].isin(final_holdout_ood_sites)].copy()
 
+        # Dev-time OOD sites must be known BEFORE the final_holdout_id carve below, so
+        # that carve can exclude them -- see the excluded_sites docstring on
+        # carve_final_holdout_id for why (an "in-distribution" hidden case must never
+        # come from a site reserved for test_ood). This moves what used to be "Stage 2"
+        # up a step; stratified_split (further down) still does the actual dev-time
+        # split, unchanged.
+        if args.ood_sites == "search":
+            ood_sites = choose_ood_sites(pool_after_ood, target_frac=args.test_ood_frac, seed=args.seed)
+            print(f"\n[search] selected {len(ood_sites)} OOD (held-out) sites: {ood_sites}")
+        else:
+            ood_sites = sorted(args.ood_sites.split(",")) if args.ood_sites else sorted(LOCKED_OOD_SITES)
+            unknown = set(ood_sites) - set(pool_after_ood["center"].unique())
+            if unknown:
+                print(f"[warning] requested OOD sites not present in dev-time pool: {sorted(unknown)}")
+            print(f"\nUsing fixed OOD (held-out) sites: {ood_sites}")
+
         final_holdout_id_df, pool_for_dev = carve_final_holdout_id(
-            pool_after_ood, args.final_holdout_id_frac, args.seed
+            pool_after_ood, args.final_holdout_id_frac, args.seed, excluded_sites=ood_sites
         )
         print(
             f"[final holdout] ID sample: n={len(final_holdout_id_df)} "
-            f"(from {len(pool_after_ood)} non-final_holdout_ood cases)"
+            f"(from {len(pool_after_ood)} non-final_holdout_ood cases, excluding OOD-reserved sites)"
         )
         print(
             f"[final holdout] total hidden: {len(final_holdout_ood_df) + len(final_holdout_id_df)} "
             f"/ {len(usable)} usable cases -- these are excluded from every dev-time split below"
         )
 
-    # --- Stage 2: existing dev-time split, applied only to what's left.
-    if args.ood_sites == "search":
-        ood_sites = choose_ood_sites(pool_for_dev, target_frac=args.test_ood_frac, seed=args.seed)
-        print(f"\n[search] selected {len(ood_sites)} OOD (held-out) sites: {ood_sites}")
-    else:
-        ood_sites = sorted(args.ood_sites.split(",")) if args.ood_sites else sorted(LOCKED_OOD_SITES)
-        unknown = set(ood_sites) - set(pool_for_dev["center"].unique())
-        if unknown:
-            print(f"[warning] requested OOD sites not present in dev-time pool: {sorted(unknown)}")
-        print(f"\nUsing fixed OOD (held-out) sites: {ood_sites}")
+    # --- Stage 2: existing dev-time split, applied only to what's left. ood_sites was
+    # already determined above (needed earlier for the final_holdout_id exclusion);
+    # the skip_final_holdout branch above never sets it, so it's determined here in
+    # that case only.
+    if ood_sites is None:
+        if args.ood_sites == "search":
+            ood_sites = choose_ood_sites(pool_for_dev, target_frac=args.test_ood_frac, seed=args.seed)
+            print(f"\n[search] selected {len(ood_sites)} OOD (held-out) sites: {ood_sites}")
+        else:
+            ood_sites = sorted(args.ood_sites.split(",")) if args.ood_sites else sorted(LOCKED_OOD_SITES)
+            unknown = set(ood_sites) - set(pool_for_dev["center"].unique())
+            if unknown:
+                print(f"[warning] requested OOD sites not present in dev-time pool: {sorted(unknown)}")
+            print(f"\nUsing fixed OOD (held-out) sites: {ood_sites}")
 
     split_df = stratified_split(
         pool_for_dev,
