@@ -1,0 +1,8 @@
+# Install the hardware-appropriate PyTorch build first.
+# nnU-Net 2.8.1 declares torch>=2.1.2 and excludes torch 2.9.*.
+nnunetv2==2.8.1
+nibabel>=5.0,<6
+numpy>=1.24
+scipy>=1.11
+pandas>=2.0
+matplotlib>=3.7
