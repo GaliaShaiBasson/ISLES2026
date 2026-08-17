@@ -71,6 +71,18 @@ python isles26.py plot
 
 Report overall Dice/HD95 and results stratified by lesion-size bin. Include empty-prediction counts and qualitative failures.
 
+## Future work (optional, not scheduled)
+
+- **Widen intensity augmentation for cross-center generalization.** Try a
+  trainer subclass with wider brightness/contrast/gamma ranges than nnU-Net's
+  defaults; compare `test_id` vs. `test_ood` Dice gap against baseline before
+  and after. Report `test_ood` per-center (site counts are unbalanced — see
+  `CLAUDE.md` "Future considerations") rather than only pooled.
+- **Domain-adversarial training** (gradient-reversal domain classifier on
+  encoder features) as a stretch experiment, only if the gap above is still
+  meaningful after the augmentation change — see `CLAUDE.md` for the
+  reasoning against doing this first.
+
 ## Resource fallback
 
 If GPU time is limited, reduce the number of folds but keep the exact same fold for every method. Do not treat the debug trainer as an experimental result. Avoid changing configuration, fold, loss, and sampling strategy simultaneously because the comparison becomes uninterpretable.

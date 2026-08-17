@@ -332,6 +332,45 @@ Newest first. Each entry: decision, rationale, where it's implemented.
 - Single fixed train/val split chosen over 5-fold CV for the same GPU-time
   reason — see split decision above.
 
+## Future considerations (discussed, not decided/implemented)
+
+Ideas raised in conversation that are explicitly *not* yet adopted — logged
+so they aren't silently lost, and re-litigated from scratch next time
+cross-center generalization comes up.
+
+### Cross-center generalization: augmentation tuning before anything adversarial (2026-08-17)
+
+- **Question raised:** would a domain-adversarial training step (gradient-
+  reversal domain classifier on encoder features, pushing toward
+  site-invariant representations) help `test_ood` generalization?
+- **Assessment:** plausible but not the first lever to pull — adversarial
+  segmentation objectives are prone to training instability, especially at
+  this dataset's size (hundreds, not tens of thousands, of cases), and risk
+  suppressing real signal if lesion characteristics correlate with site
+  prevalence. Cheaper levers likely to capture most of the benefit first:
+  - **Widen intensity augmentation ranges.** Current ranges (stock nnU-Net,
+    `nnUNetTrainer.get_training_transforms`, unmodified by any custom
+    trainer here) are mild: brightness/contrast ×0.75–1.25, gamma 0.7–1.5,
+    each applied at only 10–30% probability; elastic deformation is
+    disabled entirely (`p_elastic_deform=0`). These weren't chosen for
+    cross-scanner robustness — they're nnU-Net's generic defaults.
+  - **Normalization is already per-case z-score** (`ZScoreNormalization`,
+    mean/std from each volume's own foreground, no clipping, no shared
+    reference stats) — gives free invariance to per-scanner gain/offset but
+    nothing for non-linear differences (bias field, noise character,
+    resolution).
+  - **Report `test_ood` per-center, not just pooled.** Confirmed via
+    `workspace/splits/*.csv`: 48 centers span train/val/test_id (very
+    unbalanced — e.g. R009 contributes 83/12/16 cases across train/val/
+    test_id, while R016/R020/R063 each contribute exactly 1 training case);
+    `test_ood`'s 6 locked sites (R005, R008, R027, R029, R042, R070) are
+    also unbalanced among themselves (R005/R042/R027: 32–37 cases each;
+    R008: 7) — a pooled OOD Dice will be dominated by 3 of the 6 sites.
+- **Not implemented.** If revisited: try widened brightness/contrast/gamma
+  ranges via a new trainer subclass first (cheap, one afternoon), check
+  whether the in-distribution vs. OOD gap shrinks, and only reach for a
+  domain-adversarial head if a meaningful gap remains after that.
+
 ### Data source: ATLAS R3.0 raw, native space only
 
 - Documented in `ISLES2026_challenge.md` — cross-referenced here so it isn't
