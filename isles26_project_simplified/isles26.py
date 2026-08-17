@@ -55,7 +55,7 @@ TRAINER_GROUPS = {
     # nnU-Net's 1000-epoch default) so the study fits the available GPU time.
     # Every condition uses the same budget so the baseline/loss/sampling
     # comparison stays controlled. See PROJECT_PLAN.md.
-    "baseline": ["nnUNetTrainer_250epochs"],
+    "baseline": ["nnUNetTrainerBaseline_250epochs"],
     "losses": [
         "nnUNetTrainerDiceOnly_250epochs",
         "nnUNetTrainerFocal_250epochs",
@@ -311,30 +311,115 @@ def cmd_prepare(args: argparse.Namespace) -> int:
         "--dataset-name",
         args.dataset_name or config_value(env, "ISLES26_DATASET_NAME"),
         "--out-metadata-csv",
-        env["ISLES26_CASE_METADATA_CSV"],
+        args.out_metadata_csv or env["ISLES26_CASE_METADATA_CSV"],
     ]
     if args.dry_run:
         command.append("--dry-run")
     if args.overwrite:
         command.append("--overwrite")
+    if not args.no_split:
+        splits_dir = Path(args.splits_dir) if args.splits_dir else (Path(env["ISLES26_WORKSPACE"]) / "splits")
+        if splits_dir.is_dir():
+            command += ["--splits-dir", str(splits_dir)]
+        elif args.splits_dir:
+            raise SystemExit(f"--splits-dir does not exist: {splits_dir}")
+        else:
+            print(
+                f"[warn] {splits_dir} not found -- writing ALL discovered cases to imagesTr "
+                "(no train/val/test split applied). Run data_prep/split_dataset.py first, "
+                "or pass --no-split to silence this warning."
+            )
     run_command(command, env, args.print_only)
     return 0
+
+
+#: Even on a very large machine, preprocessing workers each hold a full volume in
+#: RAM and parallelism benefit plateaus well before core count does -- this caps
+#: the auto-detected process count rather than claiming every core unconditionally.
+AUTO_NUM_PROCESSES_CAP = 32
+#: Cores left unclaimed for the OS/other work when auto-detecting.
+AUTO_NUM_PROCESSES_RESERVE = 2
+
+
+def detect_num_processes() -> int:
+    """Usable CPU count for this machine, right now -- not hardcoded to any specific box.
+
+    Prefers os.sched_getaffinity (reflects cgroup/container CPU limits, e.g. if this
+    ever runs sandboxed) over os.cpu_count() (raw hardware count, can overcount in
+    that case). Reserves a couple cores and caps the result -- see constants above.
+    """
+    try:
+        n_cpus = len(os.sched_getaffinity(0))
+    except AttributeError:  # not available on all platforms (e.g. macOS)
+        n_cpus = os.cpu_count() or 1
+    return max(1, min(n_cpus - AUTO_NUM_PROCESSES_RESERVE, AUTO_NUM_PROCESSES_CAP))
 
 
 def cmd_preprocess(args: argparse.Namespace) -> int:
     env = build_environment()
     ensure_workspace(env)
     dataset_id = args.dataset_id or config_value(env, "ISLES26_DATASET_ID", int)
-    command = ["nnUNetv2_plan_and_preprocess", "-d", str(dataset_id)]
+    dataset_name = config_value(env, "ISLES26_DATASET_NAME")
+
+    plans_marker = Path(env["nnUNet_preprocessed"]) / f"Dataset{dataset_id:03d}_{dataset_name}" / "nnUNetPlans.json"
+    if plans_marker.is_file() and not args.overwrite and not args.print_only:
+        raise SystemExit(
+            f"Preprocessed data already exists: {plans_marker.parent}. Pass --overwrite to redo "
+            "planning/preprocessing (e.g. after a data or split change), or skip this step."
+        )
+
+    env_override = env.get("ISLES26_PREPROCESS_NUM_PROCESSES")
+    num_processes = args.num_processes or (int(env_override) if env_override else None) or detect_num_processes()
+    print(f"Using {num_processes} processes for preprocessing/fingerprint extraction (detected/configured for this machine)")
+
+    command = [
+        "nnUNetv2_plan_and_preprocess",
+        "-d", str(dataset_id),
+        "-np", str(num_processes),
+        "-npfp", str(num_processes),
+    ]
     if not args.no_verify:
         command.append("--verify_dataset_integrity")
+    if args.overwrite:
+        command.append("--clean")
     run_command(command, env, args.print_only)
+    if not args.print_only:
+        _copy_splits_final_json(env, dataset_id, dataset_name)
     return 0
+
+
+def _copy_splits_final_json(env: dict[str, str], dataset_id: int, dataset_name: str) -> None:
+    """Carry our custom splits_final.json (written by prepare) into nnUNet_preprocessed.
+
+    nnU-Net's do_split() only looks for splits_final.json inside
+    nnUNet_preprocessed/<dataset>/, which nnUNetv2_plan_and_preprocess creates --
+    it doesn't exist yet when `prepare` runs, so the file has to be copied over
+    here, after preprocessing, rather than written directly by `prepare`.
+    """
+    raw_dataset_dir = Path(env["nnUNet_raw"]) / f"Dataset{dataset_id:03d}_{dataset_name}"
+    source = raw_dataset_dir / "splits_final.json"
+    if not source.is_file():
+        return  # prepare was run with --no-split / without a splits-dir; nothing to carry over
+    preprocessed_dataset_dir = Path(env["nnUNet_preprocessed"]) / f"Dataset{dataset_id:03d}_{dataset_name}"
+    if not preprocessed_dataset_dir.is_dir():
+        print(f"[warn] {preprocessed_dataset_dir} not found; could not install splits_final.json")
+        return
+    target = preprocessed_dataset_dir / "splits_final.json"
+    shutil.copy2(source, target)
+    print(f"Installed custom splits_final.json: {target}")
+
+
+def _find_latest_checkpoint(
+    trainer: str, dataset_id: int, dataset_name: str, configuration: str, fold: str, env: dict[str, str]
+) -> Path | None:
+    checkpoint = _output_folder(trainer, dataset_id, dataset_name, configuration, fold, env) / "checkpoint_latest.pth"
+    return checkpoint if checkpoint.is_file() else None
 
 
 def _train_one(
     trainer: str,
     dataset_id: int,
+    dataset_name: str,
     configuration: str,
     fold: str,
     device: str,
@@ -342,6 +427,18 @@ def _train_one(
     args: argparse.Namespace,
     env: dict[str, str],
 ) -> None:
+    continue_training = args.continue_training
+    if not continue_training and not args.overwrite and not args.validate_only:
+        latest = _find_latest_checkpoint(trainer, dataset_id, dataset_name, configuration, fold, env)
+        if latest is not None:
+            # Training was interrupted mid-run (crash, kill, machine restart) and left a
+            # partial checkpoint_latest.pth. nnU-Net's own default (no --c) would silently
+            # start over from epoch 0 and eventually overwrite it -- for unattended
+            # multi-hour runs that's a real risk, not a hypothetical, so resume by default
+            # instead. --overwrite explicitly opts back into a genuine restart.
+            print(f"[resume] Found partial checkpoint, continuing from it instead of restarting: {latest}")
+            continue_training = True
+
     command = ["nnUNetv2_train", str(dataset_id), configuration, fold]
     if trainer != "nnUNetTrainer":
         command += ["-tr", trainer]
@@ -349,7 +446,7 @@ def _train_one(
         command += ["-num_gpus", str(num_gpus)]
     if device != "cuda":
         command += ["-device", device]
-    if args.continue_training:
+    if continue_training:
         command.append("--c")
     if args.validate_only:
         command.append("--val")
@@ -362,10 +459,29 @@ def _train_one(
     run_command(command, env, args.print_only)
 
 
+def _output_folder(
+    trainer: str, dataset_id: int, dataset_name: str, configuration: str, fold: str, env: dict[str, str]
+) -> Path:
+    return (
+        Path(env["nnUNet_results"])
+        / f"Dataset{dataset_id:03d}_{dataset_name}"
+        / f"{trainer}__nnUNetPlans__{configuration}"
+        / f"fold_{fold}"
+    )
+
+
+def _find_existing_checkpoint(
+    trainer: str, dataset_id: int, dataset_name: str, configuration: str, fold: str, env: dict[str, str]
+) -> Path | None:
+    checkpoint = _output_folder(trainer, dataset_id, dataset_name, configuration, fold, env) / "checkpoint_final.pth"
+    return checkpoint if checkpoint.is_file() else None
+
+
 def cmd_train(args: argparse.Namespace) -> int:
     env = build_environment()
     ensure_workspace(env)
     dataset_id = args.dataset_id or config_value(env, "ISLES26_DATASET_ID", int)
+    dataset_name = args.dataset_name or config_value(env, "ISLES26_DATASET_NAME")
     fold = str(args.fold if args.fold is not None else config_value(env, "ISLES26_FOLD"))
 
     if args.experiment == "debug":
@@ -381,6 +497,7 @@ def cmd_train(args: argparse.Namespace) -> int:
             dataset_id=dataset_id,
             no_verify=False,
             print_only=args.print_only,
+            overwrite=False,
         )
         cmd_preprocess(preprocess_args)
 
@@ -390,9 +507,25 @@ def cmd_train(args: argparse.Namespace) -> int:
         if not metadata.is_file() and not args.print_only:
             raise SystemExit(f"Sampling metadata is missing: {metadata}. Run `python isles26.py prepare` first.")
 
+    is_group_run = args.trainer is None and len(trainers) > 1
+    skip_guard_active = (
+        not args.continue_training and not args.validate_only and not args.overwrite and not args.print_only
+    )
+
     for trainer in trainers:
         print(f"\n== {trainer} ==")
-        _train_one(trainer, dataset_id, configuration, fold, device, num_gpus, args, env)
+        if skip_guard_active:
+            existing = _find_existing_checkpoint(trainer, dataset_id, dataset_name, configuration, fold, env)
+            if existing is not None:
+                message = (
+                    f"Training already completed: {existing}. Pass --overwrite to restart from "
+                    "scratch, or --continue to resume/verify."
+                )
+                if is_group_run:
+                    print(f"[skip] {message}")
+                    continue
+                raise SystemExit(message)
+        _train_one(trainer, dataset_id, dataset_name, configuration, fold, device, num_gpus, args, env)
     return 0
 
 
@@ -405,6 +538,20 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     slug = args.experiment.lower().replace(" ", "_").replace("/", "_")
     out_csv = Path(args.out_csv).expanduser().resolve() if args.out_csv else out_dir / f"results_{slug}.csv"
+
+    if args.case_metadata_csv:
+        case_metadata_csv = args.case_metadata_csv
+    else:
+        manifest = Path(env["ISLES26_WORKSPACE"]) / "splits" / "manifest.csv"
+        if manifest.is_file():
+            case_metadata_csv = str(manifest)
+        else:
+            print(
+                f"[warn] {manifest} not found -- falling back to {env['ISLES26_CASE_METADATA_CSV']} "
+                "(train+val only; test_id/test_ood cases won't have metadata to join)."
+            )
+            case_metadata_csv = env["ISLES26_CASE_METADATA_CSV"]
+
     command = [
         sys.executable,
         str(PROJECT_ROOT / "evaluation" / "compute_metrics.py"),
@@ -413,11 +560,15 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         "--gt-dir",
         str(gt_dir),
         "--case-metadata-csv",
-        env["ISLES26_CASE_METADATA_CSV"],
+        case_metadata_csv,
         "--experiment-name",
         args.experiment,
         "--out-csv",
         str(out_csv),
+        "--lesion-connectivity",
+        str(args.lesion_connectivity),
+        "--min-lesion-voxels",
+        str(args.min_lesion_voxels),
     ]
     run_command(command, env, args.print_only)
     return 0
@@ -426,13 +577,15 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 def cmd_aggregate(args: argparse.Namespace) -> int:
     env = build_environment()
     ensure_workspace(env)
-    results_dir = Path(env["ISLES26_RESULTS_DIR"])
+    results_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else Path(env["ISLES26_RESULTS_DIR"])
+    scan_dir = Path(env["ISLES26_RESULTS_DIR"]) if not args.out_dir else results_dir
     inputs = [Path(p).expanduser().resolve() for p in args.result_csvs]
     if not inputs:
-        inputs = sorted(results_dir.glob("results_*.csv"))
+        inputs = sorted(scan_dir.glob("results_*.csv"))
         inputs = [p for p in inputs if p.name != "results.csv"]
     if not inputs:
-        raise SystemExit(f"No per-experiment result CSVs found in {results_dir}")
+        raise SystemExit(f"No per-experiment result CSVs found in {scan_dir}")
+    results_dir.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
         str(PROJECT_ROOT / "evaluation" / "aggregate_results.py"),
@@ -443,6 +596,8 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
         str(results_dir / "summary_by_experiment.csv"),
         "--out-summary-by-size",
         str(results_dir / "summary_by_size_bin.csv"),
+        "--out-summary-by-split",
+        str(results_dir / "summary_by_split.csv"),
     ]
     run_command(command, env, args.print_only)
     return 0
@@ -488,18 +643,46 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--overwrite", action="store_true", help="Replace an existing generated dataset folder")
     p.add_argument("--print-only", action="store_true")
+    p.add_argument(
+        "--splits-dir",
+        default=None,
+        help="Split manifest dir from split_dataset.py (default: workspace/splits if it exists)",
+    )
+    p.add_argument(
+        "--out-metadata-csv",
+        default=None,
+        help="Override output path (default: workspace/case_metadata.csv)",
+    )
+    p.add_argument(
+        "--no-split",
+        action="store_true",
+        help="Ignore workspace/splits and write every discovered case to imagesTr (legacy behavior)",
+    )
     p.set_defaults(func=cmd_prepare)
 
     p = sub.add_parser("preprocess", help="Run nnU-Net planning and preprocessing")
     p.add_argument("--dataset-id", type=int)
     p.add_argument("--no-verify", action="store_true")
     p.add_argument("--print-only", action="store_true")
+    p.add_argument(
+        "--overwrite", action="store_true", help="Redo planning/preprocessing even if it already exists"
+    )
+    p.add_argument(
+        "--num-processes",
+        type=int,
+        default=None,
+        help=(
+            "Processes for -np/-npfp. Default: auto-detected from this machine's usable "
+            "CPU count (see ISLES26_PREPROCESS_NUM_PROCESSES in .env to set a fixed value instead)."
+        ),
+    )
     p.set_defaults(func=cmd_preprocess)
 
     p = sub.add_parser("train", help="Train one experiment or a predefined experiment group")
     p.add_argument("experiment", choices=sorted(TRAINER_GROUPS))
     p.add_argument("--trainer", help="Override the predefined trainer class")
     p.add_argument("--dataset-id", type=int)
+    p.add_argument("--dataset-name", help="Override the dataset name (default: ISLES26_DATASET_NAME in .env)")
     p.add_argument("--fold")
     p.add_argument("--configuration")
     p.add_argument("--device", choices=["cuda", "cpu", "mps"])
@@ -511,18 +694,39 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--npz", action="store_true")
     p.add_argument("--disable-checkpointing", action="store_true")
     p.add_argument("--print-only", action="store_true")
+    p.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Restart training from scratch even if a completed checkpoint_final.pth already exists",
+    )
     p.set_defaults(func=cmd_train)
 
-    p = sub.add_parser("evaluate", help="Compute per-case Dice and HD95 for one prediction folder")
+    p = sub.add_parser("evaluate", help="Compute per-case Dice, HD95, and lesion-wise F1 for one prediction folder")
     p.add_argument("--pred-dir", required=True)
     p.add_argument("--experiment", required=True)
     p.add_argument("--gt-dir")
     p.add_argument("--out-csv")
+    p.add_argument(
+        "--case-metadata-csv",
+        default=None,
+        help=(
+            "Defaults to workspace/splits/manifest.csv (covers all splits: train/val/"
+            "test_id/test_ood) if it exists, else falls back to the train+val-only "
+            "workspace/case_metadata.csv."
+        ),
+    )
+    p.add_argument("--lesion-connectivity", type=int, default=3, choices=(1, 2, 3),
+                    help="scipy connectivity for lesion-wise components (1=6-connected, "
+                         "3=26-connected, default 3)")
+    p.add_argument("--min-lesion-voxels", type=int, default=0,
+                    help="drop connected components smaller than this many voxels before "
+                         "lesion-wise matching (default 0 = no filtering)")
     p.add_argument("--print-only", action="store_true")
     p.set_defaults(func=cmd_evaluate)
 
     p = sub.add_parser("aggregate", help="Combine per-experiment result CSVs")
     p.add_argument("result_csvs", nargs="*")
+    p.add_argument("--out-dir", help="Override output dir (default: workspace/evaluation)")
     p.add_argument("--print-only", action="store_true")
     p.set_defaults(func=cmd_aggregate)
 

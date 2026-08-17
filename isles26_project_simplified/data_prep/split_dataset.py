@@ -201,6 +201,34 @@ def stratified_split(
     return df
 
 
+def subsample_per_split(split_df: pd.DataFrame, n_per_split: int, seed: int) -> pd.DataFrame:
+    """Shrink an already-finalized split down to ~n_per_split cases per split, for a fast
+
+    full-pipeline smoke test (prepare -> preprocess -> train debug -> evaluate -> aggregate ->
+    plot) instead of running it against the real ~1300-case dataset. Does NOT re-derive the
+    split (train/val/test_id/test_ood membership and OOD sites are unchanged) -- just takes a
+    stratified-by-size_bin random subsample within each split, so the same properties the real
+    split was designed for (balanced bins, real OOD sites) are preserved at a smaller scale.
+    """
+    rng = np.random.RandomState(seed)
+    parts = []
+    for split_name, group in split_df.groupby("split", observed=True):
+        n = min(n_per_split, len(group))
+        # Sample proportionally within each size_bin so tiny bins (e.g. "empty") aren't
+        # either dropped entirely or over-represented relative to the real split. Plain
+        # per-bin loop rather than groupby.apply -- simpler than working around apply's
+        # grouping-column-inclusion semantics for no benefit here.
+        bin_parts = []
+        for _, bin_group in group.groupby("size_bin", observed=True):
+            n_this_bin = min(len(bin_group), max(1, round(n * len(bin_group) / len(group))))
+            bin_parts.append(bin_group.sample(n=n_this_bin, random_state=rng.randint(0, 2**31 - 1)))
+        sampled = pd.concat(bin_parts, ignore_index=True)
+        if len(sampled) > n:
+            sampled = sampled.sample(n=n, random_state=rng.randint(0, 2**31 - 1))
+        parts.append(sampled)
+    return pd.concat(parts, ignore_index=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--raw-root", required=True)
@@ -217,6 +245,16 @@ def main() -> int:
             "Comma-separated site IDs to use as the fixed OOD test set, overriding "
             f"LOCKED_OOD_SITES ({','.join(LOCKED_OOD_SITES)}). Pass 'search' to run the "
             "randomized site-selection search instead (used before the OOD set was locked)."
+        ),
+    )
+    parser.add_argument(
+        "--sample-per-split",
+        type=int,
+        default=None,
+        help=(
+            "If set, shrink each split to ~N cases (stratified by size_bin) after computing "
+            "the real split, for a fast full-pipeline smoke test. Use a different --out-dir "
+            "than the real split (e.g. workspace/splits_sample) to avoid overwriting it."
         ),
     )
     args = parser.parse_args()
@@ -277,6 +315,10 @@ def main() -> int:
     # Leakage assertion: every case in exactly one split.
     assert split_df["case_id"].is_unique
     assert set(split_df["split"].unique()) <= {"train", "val", "test_id", "test_ood"}
+
+    if args.sample_per_split:
+        split_df = subsample_per_split(split_df, args.sample_per_split, args.seed)
+        print(f"\n[sample] shrunk to ~{args.sample_per_split} cases per split -> {len(split_df)} total")
 
     for split_name in ("train", "val", "test_id", "test_ood"):
         subset = split_df[split_df["split"] == split_name]

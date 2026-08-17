@@ -86,15 +86,209 @@ Newest first. Each entry: decision, rationale, where it's implemented.
   `PROJECT_REVIEW.md` already calls for.
 - **Implemented in:** `data_prep/split_dataset.py`. Finalized against the
   complete raw upload — see entry above for locked OOD sites and split sizes.
-- **Still pending (not yet implemented):**
-  1. Wire the split into `prepare_isles26_dataset.py` so only `train`+`val`
-     case IDs are ever copied into `imagesTr` — `test_id`/`test_ood` must
-     never enter nnU-Net's raw dataset at all, or nnU-Net's own fold logic
-     could quietly train on them.
-  2. Generate `splits_final.json` (single fold, `train`/`val` from our split)
-     and place it in `nnUNet_preprocessed/DatasetXXX_.../` before training,
-     so nnU-Net's `fold 0` uses our stratified split instead of generating
-     its own unstratified random one.
+
+### test_id/test_ood now reachable for prediction + evaluation (2026-08-17)
+
+- **Gap found:** `test_id`/`test_ood` cases were held out of `imagesTr`/
+  `labelsTr` (correctly), but were never written anywhere else either — no
+  ground truth to score against, no raw images in nnU-Net's flat naming for
+  `nnUNetv2_predict` to run on. The whole point of building `test_ood` was
+  to measure generalization, but there was no way to actually evaluate it.
+- **Fix:** `prepare_isles26_dataset.py` now also writes `imagesTs`/`labelsTs`
+  (nnU-Net's standard test-set layout) containing both `test_id` and
+  `test_ood` cases combined — evaluate/aggregate distinguish ID vs OOD via
+  the `split` column carried through `manifest.csv`, not via separate
+  folders.
+- `isles26.py evaluate` now defaults `--case-metadata-csv` to
+  `workspace/splits/manifest.csv` (covers all 4 splits) instead of
+  `workspace/case_metadata.csv` (train+val only, no `split` column) when the
+  manifest exists.
+- **Still pending:** `aggregate_results.py` only stratifies by `size_bin` —
+  needs a `split`-grouped summary (ID vs OOD Dice) added the same way, and
+  `evaluate`'s default `--gt-dir` (`labelsTr`) needs `labelsTs` passed
+  explicitly when scoring held-out predictions.
+
+### Sample/smoke-test pipeline runs must never touch real-run artifacts (2026-08-17)
+
+- **Decision:** `--dataset-id 999` is reserved exclusively for sample/smoke-test
+  runs (`split_dataset.py --sample-per-split`); the real dataset is always
+  `--dataset-id 1`. This alone keeps `nnUNet_raw`/`nnUNet_preprocessed`/
+  `nnUNet_results` fully separate, since nnU-Net namespaces everything under
+  `Dataset{id:03d}_...`.
+- All other sample-run outputs go under a dedicated `workspace/sample_run/`
+  tree, via explicit CLI overrides (never the shared `.env` defaults):
+  `--out-metadata-csv workspace/sample_run/case_metadata.csv`,
+  `--case-metadata-csv workspace/splits_sample/manifest.csv`,
+  `--out-csv .../workspace/sample_run/evaluation/results_*.csv`,
+  `--out-dir workspace/sample_run/evaluation` (aggregate),
+  `--out-dir workspace/sample_run/figures` (plot).
+- **Rationale:** the real split (`workspace/splits/`), real prepared dataset
+  (`Dataset001_ATLAS`), real `case_metadata.csv`, and real result CSVs must
+  never be overwritten by a smoke test. `aggregate` didn't have an
+  output-dir override before this (unlike `plot`, which already did) — added
+  `--out-dir` to close that gap.
+- `data_prep/split_dataset.py --sample-per-split N`: takes the *already
+  final* real split and draws a stratified-by-size_bin subsample of ~N cases
+  per split into a separate `--out-dir` (e.g. `workspace/splits_sample`) —
+  does not re-derive OOD sites or split membership, just subsamples within
+  the existing, reviewed split.
+
+### Critical bug found and fixed pre-launch: 250-epoch trainer __init__ signature (2026-08-17)
+
+- **Bug:** `_Epochs250Mixin.__init__` (and `nnUNetTrainerLesionAwareSampling_250epochs.__init__`)
+  used `def __init__(self, *args, **kwargs)`. nnU-Net's own `nnUNetTrainer.__init__`
+  builds `self.my_init_kwargs` via `inspect.signature(self.__init__).parameters`
+  -- since `self.__init__` resolves through the MRO to *our* mixin, that
+  introspection collected `args`/`kwargs` as the parameter names instead of
+  the real ones, and crashed with `KeyError: 'args'` the instant any
+  250-epoch trainer was actually instantiated (not caught earlier because
+  every previous smoke test only exercised `nnUNetTrainerDebugFast`, which
+  never had this bug). This would have silently killed baseline, all 4 loss
+  variants, and sampling on first real invocation of the overnight run.
+- **Fix:** declare the exact same named parameters as
+  `nnUNetTrainer.__init__` (`plans, configuration, fold, dataset_json,
+  device`), matching the pattern `nnUNetTrainerDebugMixin` already used
+  correctly. Caught and fixed by actually running a real (non-debug)
+  250-epoch trainer on the sample dataset before trusting it for the
+  overnight run -- this is why the "run the sample again" and "verify
+  before trusting" steps mattered.
+- Also added `nnUNetTrainerBaseline_250epochs` (plain `nnUNetTrainer` +
+  `_Epochs250Mixin`) so baseline gets the same `save_every=10` treatment as
+  every other condition -- previously baseline used nnunetv2's stock
+  `nnUNetTrainer_250epochs`, which doesn't have it. `TRAINER_GROUPS["baseline"]`
+  updated accordingly.
+
+### Auto-resume on interrupted training (2026-08-17)
+
+- **Decision:** `isles26.py train` now auto-detects a partial
+  `checkpoint_latest.pth` (no `checkpoint_final.pth` yet) and automatically
+  passes `--c` to resume, instead of nnU-Net's own default of silently
+  restarting from epoch 0 and eventually overwriting the partial checkpoint.
+  `--overwrite` opts back into a genuine restart; `--continue`/`--validate-only`
+  bypass the check (already explicit about what they want).
+- **Rationale:** this project now runs unattended for many hours
+  (see `run_full_experiment.sh`) with nobody available to notice a crash and
+  manually pass `--c`. A silent full restart on the next invocation would
+  waste hours of GPU time without anyone knowing.
+- Also dropped `save_every` from nnU-Net's default 50 epochs to 10 in every
+  250-epoch trainer, shrinking the worst-case unsaved-progress window from
+  ~40-60 min to ~7-12 min.
+- **Verified live**, not just assumed: ran a real 3d_fullres trainer on the
+  sample dataset to epoch 10, force-killed it, confirmed `checkpoint_latest.pth`
+  existed and `checkpoint_final.pth` didn't, re-invoked the identical command,
+  confirmed the `[resume]` log line and `--c` flag appeared, and confirmed the
+  resumed run's new log picked up at exactly "Epoch 10" (not 0) with the
+  correct continued learning-rate schedule.
+- Added `--dataset-name` to `train` (previously only `prepare`/`preprocess`
+  had it) -- needed to point `train` at the sample dataset
+  (`Dataset999_ATLASsample`) for this verification; also just a real
+  consistency gap on its own.
+- **Implemented in:** `isles26.py:_find_latest_checkpoint`, wired into
+  `_train_one`.
+
+### Unattended overnight full-run script (2026-08-17)
+
+- `run_full_experiment.sh`: preprocess dataset 1, then for each condition
+  (baseline, dice, focal, tversky, focal-tversky, sampling, in that order)
+  train -> predict on the held-out test set -> evaluate (val + held-out) ->
+  incrementally re-aggregate + re-plot. No `set -e`; each condition's
+  training gets up to 3 attempts (each re-invocation auto-resumes via the
+  mechanism above) before the script gives up on that condition and moves
+  to the next -- a crash never aborts the whole run or silently drops a
+  condition without at least trying to resume it.
+- Launched against the real dataset (id 1, `Dataset001_ATLAS`, 1,026
+  train+val cases) after all of the above was verified on the sample
+  dataset first.
+
+### dice_by_split.png added (2026-08-17)
+
+- `analysis/plot_results.py:save_by_split` — boxplot of Dice by
+  train/val/test_id/test_ood x experiment, mirroring `save_by_size`'s
+  layout. Gives the ID-vs-OOD generalization comparison a figure to go with
+  `summary_by_split.csv`, which previously only existed as a table.
+  Verified rendering correctly against the sample smoke-test results.
+
+### Full pipeline smoke test passed end-to-end (2026-08-17)
+
+- Ran split (6/split sample) -> prepare (imagesTr/labelsTr + imagesTs/labelsTs)
+  -> preprocess -> `train debug` (GPU) -> `nnUNetv2_predict` on the held-out
+  set -> evaluate (val, and test_id/test_ood separately) -> aggregate (incl.
+  the new split-stratified summary) -> plot, entirely on `Dataset999_ATLASsample`
+  / `workspace/sample_run/`. Real-run artifacts confirmed untouched throughout.
+- **Bug found and fixed:** `cmd_aggregate` gained `--out-summary-by-split`
+  support in `aggregate_results.py` but `isles26.py` never passed the flag
+  through, so it silently fell back to a CWD-relative default and landed in
+  the project root instead of the results dir. Fixed.
+- **Real-data finding (not a pipeline bug):** one held-out case
+  (`ATLAS_r028s017_ses1`) failed evaluation with a genuine affine mismatch —
+  its ground-truth mask has a real ~4 degree rotation in its affine (nnU-Net's
+  own `verify_dataset_integrity` already flagged an image/segmentation
+  direction mismatch for this exact case during `preprocess`), while the
+  exported prediction came back purely axis-aligned, ~22-32mm off in
+  translation. `evaluate`'s existing affine check caught it correctly and
+  errored instead of silently computing a wrong Dice. Expect a small number
+  of similar cases at full scale (1,284 cases) — worth a pass counting how
+  many, but not a blocker; the check is doing its job.
+- `train debug` defaults to CPU by design (see README/PROJECT_PLAN) but ran
+  noticeably slowly at batch_size=66 on CPU (~140s/epoch); `--device cuda`
+  brought a 5-epoch run down to under a minute once past CUDA warmup. Both
+  are fine for a smoke test since it's disposable either way; CPU stays the
+  documented default (must work without a GPU), GPU is worth using when one
+  is idle.
+
+### Preprocessing auto-scales worker processes to the machine (2026-08-17)
+
+- **Decision:** `preprocess` no longer uses nnU-Net's hardcoded defaults
+  (`-np`/`-npfp` = 8) — it auto-detects usable CPU count via
+  `os.sched_getaffinity(0)` (falls back to `os.cpu_count()`), reserves 2
+  cores, and caps at 32 (preprocessing workers each hold a full volume in
+  RAM; parallelism benefit plateaus well before core count does on a very
+  large machine). Override with `--num-processes` or
+  `ISLES26_PREPROCESS_NUM_PROCESSES` in `.env`.
+- **Rationale:** preprocessing is GPU-free by design in nnU-Net (checked
+  `DefaultPreprocessor` directly — no torch/cuda/device references
+  anywhere in it; it's pure NumPy/SimpleITK resampling + I/O), so CPU
+  parallelism is the only real speed lever for this step. Auto-detecting
+  keeps this correct if the pipeline ever runs on a different machine,
+  rather than hardcoding a number tied to this box's 144 cores.
+- This is pure infrastructure — doesn't affect determinism or results, so
+  (unlike the epoch/split decisions) no controlled-comparison concern here.
+- **Implemented in:** `isles26.py:detect_num_processes`, wired into
+  `cmd_preprocess`.
+
+### Idempotency guards for preprocess/train (2026-08-17)
+
+- **`preprocess`**: errors if `nnUNet_preprocessed/<dataset>/nnUNetPlans.json`
+  already exists; `--overwrite` forces a redo (`--clean` passed through to
+  nnU-Net). Matches `prepare`'s existing exists-unless-`--overwrite` behavior.
+- **`train`**: nnU-Net itself has no skip-if-done behavior (only `--c` to
+  resume) so this is our own guard, checking for
+  `checkpoint_final.pth` under the standard
+  `{trainer}__nnUNetPlans__{configuration}/fold_{fold}/` path.
+  - Single explicit trainer (`--trainer X` or a single-trainer group like
+    `dice`/`baseline`): **hard-aborts** if already trained — nothing else to
+    fall through to.
+  - Multi-trainer group (`losses`, 4 trainers): **skips** the already-done
+    trainer and continues with the rest — hard-aborting the whole group on
+    the first completed member would defeat resuming an interrupted study.
+  - `--overwrite`, `--continue`, `--validate-only`, `--print-only` all bypass
+    the guard (they're explicitly asking to touch the existing checkpoint).
+
+### Split wired into prepare/preprocess (2026-08-17)
+
+- `prepare_isles26_dataset.py --splits-dir`: only `train`+`val` case IDs are
+  copied to `imagesTr`/`labelsTr`; `test_id`/`test_ood` are never written to
+  the nnU-Net raw dataset. Also writes `splits_final.json` (single fold, our
+  train/val ids) next to `dataset.json`.
+- `isles26.py prepare` auto-passes `--splits-dir workspace/splits` when that
+  directory exists (warns loudly and falls back to all-cases if missing);
+  `--no-split` opts back into legacy behavior.
+- `isles26.py preprocess` copies that `splits_final.json` into
+  `nnUNet_preprocessed/<dataset>/` after `nnUNetv2_plan_and_preprocess` runs,
+  so nnU-Net's `do_split()` picks it up instead of generating its own
+  unstratified random fold.
+- Verified live: 1,026 cases in `imagesTr` (898 train + 128 val), 0
+  test_id/test_ood leakage, `splits_final.json` fold matches exactly.
 
 ### Raw-data integrity validation before use
 

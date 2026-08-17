@@ -14,6 +14,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 
 
@@ -77,8 +78,25 @@ class nnUNetTrainerLesionAwareSampling(nnUNetTrainer):
 
 
 class nnUNetTrainerLesionAwareSampling_250epochs(nnUNetTrainerLesionAwareSampling):
-    """Same lesion-aware sampling, rescaled to the project-wide 250-epoch budget."""
+    """Same lesion-aware sampling, rescaled to the project-wide 250-epoch budget.
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    save_every=10 (down from nnU-Net's default 50) for the same unattended-run
+    safety reason as the loss-variant trainers -- see
+    nnUNetTrainerLossVariants._Epochs250Mixin.
+
+    __init__ must declare nnU-Net's exact named parameters, not *args/**kwargs
+    -- see the long comment on _Epochs250Mixin for why (this is the same bug,
+    fixed the same way).
+    """
+
+    def __init__(
+        self,
+        plans: dict,
+        configuration: str,
+        fold: int,
+        dataset_json: dict,
+        device: torch.device = torch.device("cuda"),
+    ):
+        super().__init__(plans, configuration, fold, dataset_json, device=device)
         self.num_epochs = 250
+        self.save_every = 10

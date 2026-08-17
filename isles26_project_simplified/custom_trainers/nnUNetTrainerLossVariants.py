@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import torch
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 
@@ -60,11 +61,46 @@ class _Epochs250Mixin:
     ``num_epochs`` changes, so the schedule shape (SGD + PolyLRScheduler) is
     preserved, just compressed. Applied identically to every loss variant so
     the cross-condition comparison stays controlled.
+
+    Also drops ``save_every`` from nnU-Net's default of 50 epochs to 10: these
+    runs are meant to survive an unattended, unsupervised multi-hour stretch, so
+    the worst-case amount of training lost to an unnoticed crash matters more
+    here than the small extra disk-write overhead of checkpointing more often.
+
+    __init__ must declare nnU-Net's exact named parameters (not *args/**kwargs):
+    nnUNetTrainer.__init__ builds self.my_init_kwargs via
+    ``inspect.signature(self.__init__).parameters`` -- since `self.__init__`
+    resolves through the MRO to *this* __init__, a generic *args/**kwargs
+    signature makes that introspection collect the wrong parameter names and
+    crash with `KeyError: 'args'` the moment a trainer using this mixin is
+    actually instantiated. This bit us for real: caught during pre-launch
+    testing, before it could silently break every 250-epoch trainer on the
+    unattended overnight run. Mirrors nnUNetTrainerDebugMixin's pattern.
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        plans: dict,
+        configuration: str,
+        fold: int,
+        dataset_json: dict,
+        device: torch.device = torch.device("cuda"),
+    ):
+        super().__init__(plans, configuration, fold, dataset_json, device=device)
         self.num_epochs = 250
+        self.save_every = 10
+
+
+class nnUNetTrainerBaseline_250epochs(_Epochs250Mixin, nnUNetTrainer):
+    """Plain Dice+CE baseline at the 250-epoch/save_every=10 budget.
+
+    Exists instead of using nnunetv2's stock ``nnUNetTrainer_250epochs``
+    specifically to get the reduced save_every -- the stock class doesn't
+    have it, and we want every condition in the study checkpointing on the
+    same safe schedule.
+    """
+
+    pass
 
 
 class nnUNetTrainerDiceOnly_250epochs(_Epochs250Mixin, nnUNetTrainerDiceOnly):

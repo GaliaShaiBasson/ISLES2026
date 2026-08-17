@@ -10,7 +10,8 @@ import pandas as pd
 
 
 def save_overall(df: pd.DataFrame, out_dir: Path) -> None:
-    summary = df.groupby("experiment", observed=True)[["dice", "hd95_mm"]].mean()
+    metric_cols = [c for c in ("dice", "hd95_mm", "lesion_f1") if c in df.columns]
+    summary = df.groupby("experiment", observed=True)[metric_cols].mean()
 
     figure, axis = plt.subplots(figsize=(8, 4.5))
     summary["dice"].plot(kind="bar", ax=axis, legend=False)
@@ -31,6 +32,19 @@ def save_overall(df: pd.DataFrame, out_dir: Path) -> None:
     figure.tight_layout()
     figure.savefig(out_dir / "overall_hd95.png", dpi=180)
     plt.close(figure)
+
+    if "lesion_f1" in summary.columns:
+        figure, axis = plt.subplots(figsize=(8, 4.5))
+        summary["lesion_f1"].plot(kind="bar", ax=axis, legend=False)
+        axis.set_title("Mean lesion-wise F1 by experiment")
+        axis.set_xlabel("")
+        axis.set_ylabel("Lesion-wise F1")
+        axis.tick_params(axis="x", rotation=30)
+        figure.tight_layout()
+        figure.savefig(out_dir / "overall_lesion_f1.png", dpi=180)
+        plt.close(figure)
+    else:
+        print("[skip] lesion_f1 column is absent")
 
 
 def save_by_size(df: pd.DataFrame, out_dir: Path) -> None:
@@ -61,6 +75,41 @@ def save_by_size(df: pd.DataFrame, out_dir: Path) -> None:
     axis.tick_params(axis="x", rotation=30)
     figure.tight_layout()
     figure.savefig(out_dir / "dice_by_size_bin.png", dpi=180)
+    plt.close(figure)
+
+
+def save_by_split(df: pd.DataFrame, out_dir: Path) -> None:
+    """train/val/test_id/test_ood -- the ID-vs-OOD generalization comparison this
+    project's split was built to produce (see CLAUDE.md). Mirrors save_by_size's
+    boxplot-per-group-per-experiment layout.
+    """
+    if "split" not in df.columns:
+        print("[skip] split column is absent (use manifest.csv as --case-metadata-csv when evaluating)")
+        return
+    plot_data = df.dropna(subset=["split", "experiment", "dice"]).copy()
+    if plot_data.empty:
+        print("[skip] no split data is available")
+        return
+    split_order = ["train", "val", "test_id", "test_ood"]
+    present_splits = [s for s in split_order if s in plot_data["split"].unique()]
+    plot_data["split"] = pd.Categorical(plot_data["split"], categories=present_splits, ordered=True)
+    groups = []
+    labels = []
+    for split_name in present_splits:
+        for experiment in sorted(plot_data["experiment"].unique()):
+            values = plot_data.loc[
+                (plot_data["split"] == split_name) & (plot_data["experiment"] == experiment), "dice"
+            ].dropna()
+            if not values.empty:
+                groups.append(values.to_numpy())
+                labels.append(f"{split_name}\n{experiment}")
+    figure, axis = plt.subplots(figsize=(max(9, len(groups) * 1.2), 5))
+    axis.boxplot(groups, tick_labels=labels, showmeans=True)
+    axis.set_title("Dice by split (train/val/test_id/test_ood)")
+    axis.set_ylabel("Dice")
+    axis.tick_params(axis="x", rotation=30)
+    figure.tight_layout()
+    figure.savefig(out_dir / "dice_by_split.png", dpi=180)
     plt.close(figure)
 
 
@@ -124,6 +173,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     save_overall(frame, out_dir)
     save_by_size(frame, out_dir)
+    save_by_split(frame, out_dir)
     save_by_center(frame, out_dir)
     save_volume_scatter(frame, out_dir)
     print(f"Figures written to {out_dir}")
