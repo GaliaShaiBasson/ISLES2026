@@ -338,6 +338,26 @@ Ideas raised in conversation that are explicitly *not* yet adopted — logged
 so they aren't silently lost, and re-litigated from scratch next time
 cross-center generalization comes up.
 
+### Switch to nnU-Net's ResEnc planner (M or L) instead of the default planner (2026-08-17)
+
+- **Context:** `nnUNetv2_plan_and_preprocess` (called with no `-pl` flag in
+  `isles26.py:cmd_preprocess`) warns on every run that it's using nnU-Net's
+  old default planner (`ExperimentPlanner`, plain U-Net encoder) and points
+  at the newer residual-encoder presets, which nnU-Net's own benchmarks show
+  outperforming the default at the same or modest extra GPU cost.
+- **GPU available:** NVIDIA L40S, 46 GB VRAM (~37 GB free at last check) —
+  comfortably covers `nnUNetPlannerResEncM` (similar budget to default) and
+  likely `nnUNetPlannerResEncL` (~24 GB) too; `nnUNetPlannerResEncXL`
+  (~40 GB) would be tight against other GPU usage on the box.
+- **Not implemented / not decided which of M vs. L.** This is an
+  architecture change, not a tuning knob — it would need to apply uniformly
+  across baseline/losses/sampling to keep the comparison controlled (same
+  principle as the 250-epoch decision above), and picking between M and L
+  is a real tradeoff (L likely stronger but slower/more memory) worth a
+  short discussion before committing, not a default swap-in. Revisit
+  alongside or after the cross-center generalization augmentation work
+  above.
+
 ### Cross-center generalization: augmentation tuning before anything adversarial (2026-08-17)
 
 - **Question raised:** would a domain-adversarial training step (gradient-
