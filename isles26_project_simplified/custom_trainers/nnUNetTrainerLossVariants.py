@@ -6,7 +6,7 @@ import torch
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 
-from .losses import DiceOnlyLoss, FocalLoss, FocalTverskyLoss, TverskyLoss
+from .losses import DiceOnlyLoss, DiceTverskyLoss, FocalLoss, FocalTverskyLoss, TverskyLoss
 
 
 def _ignore_label(trainer: nnUNetTrainer) -> int:
@@ -51,6 +51,27 @@ class nnUNetTrainerFocalTversky(nnUNetTrainer):
         return _wrap_with_deep_supervision(
             self,
             FocalTverskyLoss(alpha=0.3, beta=0.7, gamma=0.75, ignore_index=_ignore_label(self)),
+        )
+
+
+class nnUNetTrainerTverskyMild(nnUNetTrainer):
+    """Dice + softened-asymmetry Tversky (alpha=0.4/beta=0.6), not Tversky alone.
+
+    Follow-up to nnUNetTrainerTversky (alpha=0.3/beta=0.7, Tversky-only): that variant
+    genuinely improved small-lesion recall (best true-positive/false-negative rate of
+    every condition tested on the real dataset) but lost enough precision (extra
+    false-positive components) that lesion-wise F1 still landed below baseline. Two
+    changes here, both aimed at keeping the recall gain while reining in the
+    false-positive cost -- see DiceTverskyLoss's docstring and the 2026-08-18 CLAUDE.md
+    entry for the evidence this is based on:
+      - alpha/beta pulled toward 0.5 (less aggressive false-negative penalty)
+      - Dice added back into the loss (nnUNetTrainerTversky drops it entirely)
+    """
+
+    def _build_loss(self):
+        return _wrap_with_deep_supervision(
+            self,
+            DiceTverskyLoss(tversky_alpha=0.4, tversky_beta=0.6, ignore_index=_ignore_label(self)),
         )
 
 
@@ -116,4 +137,8 @@ class nnUNetTrainerTversky_250epochs(_Epochs250Mixin, nnUNetTrainerTversky):
 
 
 class nnUNetTrainerFocalTversky_250epochs(_Epochs250Mixin, nnUNetTrainerFocalTversky):
+    pass
+
+
+class nnUNetTrainerTverskyMild_250epochs(_Epochs250Mixin, nnUNetTrainerTverskyMild):
     pass

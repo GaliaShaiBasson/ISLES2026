@@ -68,9 +68,24 @@ TRAINER_GROUPS = {
     "focal": ["nnUNetTrainerFocal_250epochs"],
     "tversky": ["nnUNetTrainerTversky_250epochs"],
     "focal-tversky": ["nnUNetTrainerFocalTversky_250epochs"],
+    "tversky-mild": ["nnUNetTrainerTverskyMild_250epochs"],
     "sampling": ["nnUNetTrainerLesionAwareSampling_250epochs"],
     "sampling-pow": ["nnUNetTrainerLesionAwareSamplingPow_250epochs"],
     "debug": ["nnUNetTrainerDebugFast"],
+
+    # 500-epoch run against Dataset002_ATLAS (the corrected, 1,453-case full
+    # split -- see CLAUDE.md). Requires --dataset-id 2. Sampling uses the
+    # original 4:2:1 bin-level ratio, not the power-law variant -- the pow
+    # variant's own 250-epoch results (val/test_id/test_ood Dice all lower
+    # than plain 4:2:1) argued against it before this run was staged. Includes
+    # tversky-mild alongside focal-tversky (in addition to, not instead of --
+    # tversky-mild's own 250-epoch/dataset001 run had no results yet when this
+    # was assembled). DA5 augmentation was investigated but not verified in
+    # time; stock augmentation only for this run.
+    "baseline-500": ["nnUNetTrainerBaseline_500epochs"],
+    "focal-tversky-500": ["nnUNetTrainerFocalTversky_500epochs"],
+    "tversky-mild-500": ["nnUNetTrainerTverskyMild_500epochs"],
+    "sampling-500": ["nnUNetTrainerLesionAwareSampling_500epochs_full"],
 }
 
 
@@ -402,6 +417,10 @@ SAMPLING_METADATA_BY_TRAINER = {
     "nnUNetTrainerLesionAwareSamplingPow_250epochs": (
         "ISLES26_SAMPLING_POW_METADATA_CSV",
         "workspace/case_metadata_pow_p05.csv",
+    ),
+    "nnUNetTrainerLesionAwareSampling_500epochs_full": (
+        "ISLES26_CASE_METADATA_CSV_FULL",
+        "workspace/case_metadata_full.csv",
     ),
 }
 

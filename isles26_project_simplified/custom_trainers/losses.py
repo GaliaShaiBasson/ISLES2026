@@ -104,6 +104,38 @@ class FocalTverskyLoss(nn.Module):
         return self.tversky(net_output, target).clamp(min=1e-7).pow(self.gamma)
 
 
+class DiceTverskyLoss(nn.Module):
+    """Compound loss: dice_weight*Dice + tversky_weight*Tversky (unweighted sum by default,
+    mirrors nnU-Net's own DC_and_CE_loss pattern of summing rather than averaging terms).
+
+    Dice keeps the region-overlap gradient that a standalone Tversky/Focal term lacks a
+    counterweight for -- see the 2026-08-18 CLAUDE.md entry: plain nnUNetTrainerTversky
+    (alpha=0.3/beta=0.7, no Dice term) genuinely improved small-lesion recall (best
+    true-positive/false-negative rate of every condition tested) but at the cost of enough
+    extra false-positive components that lesion-wise F1 still landed below baseline.
+    Softening the asymmetry (alpha=0.4/beta=0.6) and adding Dice back in is meant to keep
+    the recall benefit while reining in that false-positive cost.
+    """
+
+    def __init__(
+        self,
+        tversky_alpha: float = 0.4,
+        tversky_beta: float = 0.6,
+        dice_weight: float = 1.0,
+        tversky_weight: float = 1.0,
+        smooth: float = 1e-5,
+        ignore_index: int = -100,
+    ):
+        super().__init__()
+        self.dice = DiceOnlyLoss(smooth=smooth, ignore_index=ignore_index)
+        self.tversky = TverskyLoss(alpha=tversky_alpha, beta=tversky_beta, smooth=smooth, ignore_index=ignore_index)
+        self.dice_weight = float(dice_weight)
+        self.tversky_weight = float(tversky_weight)
+
+    def forward(self, net_output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        return self.dice_weight * self.dice(net_output, target) + self.tversky_weight * self.tversky(net_output, target)
+
+
 class DiceOnlyLoss(nn.Module):
     def __init__(self, smooth: float = 1e-5, ignore_index: int = -100):
         super().__init__()
