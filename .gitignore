@@ -8,6 +8,12 @@ nnUNet_results/
 ATLAS*/
 data/project_debug_data
 
+# Hidden final-holdout test set (id + ood) -- this project's stand-in for the
+# real, never-received ISLES'26 challenge test set. Must never be committed or
+# casually inspected; also self-.gitignore's via its own .gitignore. See
+# data_prep/split_dataset.py and CLAUDE.md.
+**/final_holdout/
+
 # Generated outputs
 results.csv
 results_baseline.csv

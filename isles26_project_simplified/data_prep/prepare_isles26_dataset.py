@@ -30,13 +30,24 @@ MODALITIES = ["T1"]
 
 
 def find_cases(raw_root: Path) -> dict[str, dict]:
-    """Discover usable subject/session pairs in the ATLAS R2.1 tree."""
+    """Discover usable subject/session pairs in the ATLAS R2.1 tree.
+
+    Site directories are discovered by structure -- any subdirectory that
+    directly contains at least one ``sub-*`` folder -- not by an ``R*`` name
+    pattern. Most ATLAS sites are numbered ``R0XX``, but not all: the ``SOOP``
+    site (169 cases) uses a different naming scheme and was silently skipped
+    entirely (not logged as broken or skipped -- just never discovered) when
+    this only globbed ``R*``. Found 2026-08-17 when the raw tree's total case
+    count (1,453) didn't match the number of cases the pipeline had ever
+    processed (1,284) -- see CLAUDE.md.
+    """
     cases: dict[str, dict] = {}
     search_root = raw_root / "Training_Raw" if (raw_root / "Training_Raw").is_dir() else raw_root
 
-    for center_dir in sorted(search_root.glob("R*")):
-        if not center_dir.is_dir():
-            continue
+    center_dirs = sorted(
+        d for d in search_root.iterdir() if d.is_dir() and not d.name.startswith(".") and any(d.glob("sub-*"))
+    )
+    for center_dir in center_dirs:
         for sub_dir in sorted(center_dir.glob("sub-*")):
             for ses_dir in sorted(sub_dir.glob("ses-*")):
                 anat_dir = ses_dir / "anat"
@@ -76,11 +87,17 @@ def find_cases(raw_root: Path) -> dict[str, dict]:
 
 
 def load_split_manifest(splits_dir: Path) -> dict[str, str]:
-    """Read train/val/test_id/test_ood CSVs from split_dataset.py's --out-dir.
+    """Read split CSVs from split_dataset.py's --out-dir.
 
-    Returns {case_id: split_name}. Raises if a required split file is missing
-    so a stale/partial splits-dir fails loudly instead of silently training on
-    the wrong set of cases.
+    Returns {case_id: split_name}. The four dev-time splits (train/val/
+    test_id/test_ood) are required; raises if any is missing so a stale/
+    partial splits-dir fails loudly instead of silently training on the wrong
+    set of cases. ``final_holdout_id``/``final_holdout_ood.csv`` are read too
+    when present (older splits-dirs predate them) purely so those case IDs
+    are known to be "spoken for" -- filter_cases_by_split/write_holdout_test_set
+    deliberately exclude them from every nnU-Net-visible folder; they are the
+    project's stand-in for the real (never-received) ISLES'26 challenge test
+    set and must not be touched until the very end.
     """
     case_to_split: dict[str, str] = {}
     for split_name in ("train", "val", "test_id", "test_ood"):
@@ -93,6 +110,12 @@ def load_split_manifest(splits_dir: Path) -> dict[str, str]:
         frame = pd.read_csv(path)
         for case_id in frame["case_id"]:
             case_to_split[str(case_id)] = split_name
+    for split_name in ("final_holdout_id", "final_holdout_ood"):
+        path = splits_dir / f"{split_name}.csv"
+        if path.is_file():
+            frame = pd.read_csv(path)
+            for case_id in frame["case_id"]:
+                case_to_split[str(case_id)] = split_name
     return case_to_split
 
 
@@ -101,10 +124,14 @@ def filter_cases_by_split(cases: dict[str, dict], case_to_split: dict[str, str])
 
     test_id/test_ood must never enter imagesTr: nnU-Net's own fold logic treats
     everything there as fair game for training, and it has no held-out-test
-    concept of its own (see CLAUDE.md).
+    concept of its own (see CLAUDE.md). final_holdout_id/final_holdout_ood must
+    never enter imagesTr either, for the same reason plus a stronger one: they
+    stand in for the real ISLES'26 challenge test set and are not to be looked
+    at, in any form, until the project's final evaluation.
     """
     included: dict[str, dict] = {}
     skipped_test = 0
+    skipped_final_holdout = 0
     skipped_unknown = 0
     for case_id, info in cases.items():
         split_name = case_to_split.get(case_id)
@@ -112,6 +139,8 @@ def filter_cases_by_split(cases: dict[str, dict], case_to_split: dict[str, str])
             included[case_id] = info
         elif split_name in ("test_id", "test_ood"):
             skipped_test += 1
+        elif split_name in ("final_holdout_id", "final_holdout_ood"):
+            skipped_final_holdout += 1
         else:
             # Discovered on disk but absent from the split manifest -- e.g. the raw
             # tree changed since the manifest was generated. Excluding (not silently
@@ -120,7 +149,9 @@ def filter_cases_by_split(cases: dict[str, dict], case_to_split: dict[str, str])
             print(f"[skip] {case_id}: not present in split manifest, excluding from imagesTr")
     print(
         f"Split filter: {len(included)} train+val cases included, "
-        f"{skipped_test} test_id/test_ood cases held out, {skipped_unknown} unmatched cases excluded"
+        f"{skipped_test} test_id/test_ood cases held out, "
+        f"{skipped_final_holdout} final_holdout cases held out (never enters imagesTr/imagesTs), "
+        f"{skipped_unknown} unmatched cases excluded"
     )
     return included
 
