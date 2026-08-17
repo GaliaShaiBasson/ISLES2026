@@ -37,6 +37,137 @@ together. Cross-reference rather than duplicate.
 
 Newest first. Each entry: decision, rationale, where it's implemented.
 
+### Backfill complete: full val/test_id/test_ood coverage for all 6 conditions (2026-08-17)
+
+- Ran the deferred baseline/dice/focal held-out predict+evaluate once the
+  main pipeline finished and the GPU was fully idle (no contention this
+  time, unlike the earlier attempt). All three succeeded cleanly. Re-ran
+  `aggregate`/`plot` to fold them in.
+- **Consistent finding across all 6 conditions**: `test_ood` Dice is equal
+  to or higher than `test_id` Dice in every single condition (baseline
+  0.625->0.665, dice 0.602->0.638, focal 0.440->0.495, tversky 0.591->0.619,
+  focal-tversky 0.593->0.623, sampling 0.608->0.661) -- no visible
+  generalization gap in this split, which is the opposite of what ISLES'26's
+  motivating premise (ATLAS'22 generalization gap) would predict. Worth
+  investigating per-site (not just pooled OOD) before writing this up --
+  could be genuine, could be an artifact of which 6 sites ended up in the
+  locked OOD set.
+- **sampling (4:2:1) vs baseline, by size bin (val)**: small 0.500 vs 0.494
+  (+0.006, noise-level), medium 0.523 vs 0.586 (-0.062), large 0.798 vs
+  0.819 (-0.021) -- real cost, marginal/unclear benefit. Motivated the
+  `sampling-pow` (p=0.5) follow-up as the next informative data point
+  (stronger correction, to distinguish "sampling doesn't help here" from
+  "4:2:1 was too weak to show it") -- not run yet, GPU was occupied with
+  the backfill; ready via `python isles26.py train sampling-pow --dataset-id 1`.
+
+### Overnight run complete (2026-08-17), one post-hoc aggregate fix
+
+- All 6 conditions attempted: baseline, dice, focal, tversky, focal-tversky,
+  sampling. Pipeline exited cleanly ~18:07.
+- **Final `aggregate` step failed once** on a duplicate-row conflict against
+  `workspace/evaluation/results_val_only.csv` -- a manually-created combined
+  file (from testing the `lesion_f1` addition mid-run) that got swept up by
+  `aggregate`'s `results_*.csv` auto-glob alongside the real per-condition
+  files, since it already contained `baseline_val`/`dice_val`/etc. rows. Not
+  a bug in the duplicate check -- it correctly caught a real overlap. Fixed
+  by moving the manual file (and its summary siblings) into
+  `workspace/evaluation/manual_val_only_run/`, then re-ran `aggregate`/`plot`
+  successfully. **Takeaway:** any manual/ad-hoc `--out-combined`/evaluate
+  output placed directly in `workspace/evaluation/` risks colliding with the
+  auto-glob the next time `aggregate` runs with no explicit file list --
+  keep one-off combined files in a subdirectory instead.
+- `compute_metrics.py`/`aggregate_results.py`/`plot_results.py` gained a
+  `lesion_f1` metric (lesion-wise F1, with `--lesion-connectivity`/
+  `--min-lesion-voxels` args) and `isles26.py` was updated to pass them
+  through -- done by the user mid-run, already reflected in current results.
+
+### Run-identity fingerprinting implemented -- results/checkpoints can no longer silently collide across hyperparameter changes (2026-08-17)
+
+Closes the gotcha below. Chosen approach (of 3 options presented): **auto-fingerprint
+from actual config**, no manually-typed run tag to remember.
+
+- **`compute_run_fingerprint(trainer, dataset_id, dataset_name, configuration, fold, env)`**
+  (`isles26.py`) captures everything that determines a run's results but that nnU-Net's
+  own output-folder naming (trainer/plans/config/fold) can't see on its own: `num_epochs`
+  and `save_every` (regex over `inspect.getsource(cls.__init__)`, run in a subprocess with
+  `nnUNet_extTrainer` set -- doesn't rely on the trainer being named `..._250epochs`, so
+  it also catches someone changing epochs without renaming the class), `n_folds_in_split`
+  (length of the active `splits_final.json` in `nnUNet_preprocessed`, so a switch from our
+  1-fold split to a real 5-fold CV doesn't silently reuse fold 0's folder), and, for
+  lesion-aware-sampling trainers, a hash of the actual `(case_id, sampling_weight)` pairs
+  in whichever metadata CSV that trainer reads (ties identity to weight *content*, so
+  regenerating `case_metadata_pow_p05.csv` with a different `--p` is correctly seen as a
+  different run even though the filename didn't change).
+- **`run_id_from_fingerprint()`**: `{trainer}__{config}__fold{fold}__fp{10-hex-digest}` --
+  readable prefix, but the hash is what actually guarantees no collision.
+- **Checkpoints**: `cmd_train` now calls `_guard_run_fingerprint(output_folder, fingerprint,
+  overwrite)` before the existing checkpoint skip-guard, for every trainer in the run
+  (writes `isles26_fingerprint.json` inside nnU-Net's own output folder). No stored
+  fingerprint yet (first time, or a pre-fingerprint legacy folder like the ones from
+  tonight's overnight run) -> adopts the current fingerprint, no error. Stored fingerprint
+  matches -> normal resume/rerun, unchanged behavior. Stored fingerprint differs -> refuses
+  with a field-by-field diff unless `--overwrite`, in which case the old folder is moved
+  aside to `<folder>.archived_<timestamp>/` (never deleted) before a fresh one starts.
+  Verified live: adopted tonight's real `nnUNetTrainerBaseline_250epochs` folder without
+  touching it, confirmed idempotent re-run, confirmed a synthetic `num_epochs` change is
+  correctly refused without `--overwrite`.
+- **Results**: `evaluate --trainer <name> [--dataset-id/--configuration/--fold] --split
+  <val|test|...>` (replaces manually typing `--experiment "${group}_val"` /
+  `--out-csv ...`) writes to `workspace/evaluation/runs/<run_id>/results_<split>.csv` plus
+  a `run_manifest.json` (fingerprint + git commit + checkpoint path/mtime + pred/gt dirs +
+  timestamp) in the same folder -- full provenance for later comparison/post-processing
+  without re-running anything. If the target CSV already exists: no `--overwrite` ->
+  `[skip]` (idempotent, matches `train`'s pattern -- re-running the pipeline unchanged
+  never duplicates rows); `--overwrite` -> the previous CSV is archived into
+  `runs/<run_id>/archive/<timestamp>_results_<split>.csv`, not deleted, before recomputing.
+  `--trainer` is optional -- omitting it keeps the old flat `--experiment`-named layout for
+  one-off/manual evaluate calls that aren't part of the tracked grid.
+- **`aggregate`** now globs both the flat legacy layout and `runs/*/results_*.csv` (old
+  results from before this change keep working unmodified), and additionally writes
+  `runs_index.csv` -- one row per run, all manifest fields flattened -- a single flat
+  catalog to compare/audit runs without opening JSON files.
+- **`run_full_experiment.sh`** updated to call `evaluate --trainer "$trainer" --split
+  val|test` instead of the old `--experiment "${group}_val"` form.
+- Verified live end-to-end against the real completed `baseline` run: fingerprint computed
+  correctly (`num_epochs=250, n_folds_in_split=1, sampling_weight_hash=None`), evaluate
+  wrote real results to the new path, immediate re-run correctly skipped, `aggregate`
+  picked up both layouts, `runs_index.csv` had the one real row -- then the test artifacts
+  were removed and `aggregate`/`plot` re-run to restore the real 6-condition state exactly.
+
+### Gotcha for later: a same-named variant run (e.g. a hypothetical 500-epoch version) would silently overwrite result CSVs, even though checkpoints are safe (2026-08-17) -- SUPERSEDED, see entry above
+
+- **Checkpoints are safe automatically.** nnU-Net namespaces training output
+  by exactly 4 things: trainer class name, plans identifier, configuration,
+  fold (`nnUNet_results/Dataset{id}_{name}/{trainer}__{plans}__{config}/fold_{fold}/`).
+  As long as a variant (different epoch count, different hyperparameter,
+  whatever) gets its own trainer class name -- this project's existing
+  convention, e.g. `nnUNetTrainerBaseline_250epochs` vs. a hypothetical
+  `..._500epochs` -- checkpoints land in different folders automatically. No
+  action needed there; this is already how every trainer in this project is
+  named.
+- **Result CSVs are NOT safe automatically -- real gap, not just a risk.**
+  `run_full_experiment.sh` derives every evaluate/aggregate output name from
+  the plain group name (`baseline`, `dice`, ...), never from the trainer
+  class or epoch count: `--experiment "${group}_val"` ->
+  `results_baseline_val.csv` regardless of which trainer variant produced it.
+  A 500-epoch (or any other) variant run, reusing this script unmodified,
+  would silently overwrite `results_baseline_val.csv`/`results_baseline_test.csv`
+  and merge indistinguishably into `results.csv`/`summary_by_split.csv` --
+  `aggregate`'s duplicate-row check wouldn't catch it either, since the
+  experiment-name string would be identical, so it would look like a valid
+  re-run rather than a collision.
+- **Fix pattern for whenever this comes up** (not yet implemented -- deferred
+  until an actual variant run is wanted): thread a variant tag through every
+  artifact name for that run, either by suffixing every `--experiment`/
+  `--out-csv` value (`"${group}_500ep_val"`) or, more simply, giving the
+  whole variant run its own `--out-dir` (mirrors how the sample run got its
+  own `workspace/sample_run/` tree, and `sampling-pow`'s dedicated metadata
+  CSV/trainer name).
+- **Do not edit `run_full_experiment.sh` in place while it's actively
+  running** -- for a future variant run, copy it to a new script with the
+  tag baked in rather than modifying the live file (risk of it re-reading a
+  half-edited script mid-loop).
+
 ### Split finalized (2026-08-17): 1,284/1,284 usable, OOD sites locked
 
 - **OOD site list locked**: `R005, R008, R027, R029, R042, R070` (6 sites,
@@ -132,6 +263,91 @@ Newest first. Each entry: decision, rationale, where it's implemented.
   per split into a separate `--out-dir` (e.g. `workspace/splits_sample`) —
   does not re-derive OOD sites or split membership, just subsamples within
   the existing, reviewed split.
+
+### Power-law sampling-ratio variant, prepared but not launched (2026-08-17)
+
+- **Motivation:** the 4:2:1 fixed ratio used by `nnUNetTrainerLesionAwareSampling_250epochs`
+  was an arbitrary geometric default, not derived from the data. Computed the
+  real per-bin foreground-voxel mass on the actual training pool: despite
+  equal case counts (342/342/342), **large lesions hold 91.5% of all
+  foreground volume, small lesions only 0.9%** -- the true imbalance is far
+  more extreme than case counts suggest. Full correction (equalizing total
+  voxel exposure per bin) works out to ≈102:12:1, which would likely
+  undertrain "large"; p=0.5 (sqrt-dampened) works out to ≈10:3.5:1, a
+  principled middle ground grounded in the real numbers.
+- **Implemented:** `metadata_utils.sampling_weights_from_size_bin_power(size_bins,
+  volumes, p)` -- `weight(bin) ∝ (1/total_volume(bin))**p`; p=0 reproduces
+  uniform/case-balanced, p=1 is full correction, p=0.5 is the recommended
+  starting point.
+  `data_prep/generate_pow_sampling_metadata.py` generates a standalone
+  metadata CSV from this (never overwrites the original).
+  `nnUNetTrainerLesionAwareSamplingPow_250epochs` (new trainer, `sampling-pow`
+  group) reads it.
+- **Isolation from the original sampling run, by design** (per explicit
+  request): distinct trainer class name (own nnU-Net output folder
+  automatically, since nnU-Net namespaces by trainer name) AND a distinct
+  metadata CSV (`workspace/case_metadata_pow_p05.csv`, via a dedicated
+  `CASE_METADATA_CSV_ENV_VAR`/`CASE_METADATA_CSV_DEFAULT` class-attribute
+  pattern on `nnUNetTrainerLesionAwareSampling`, overridden per subclass).
+  Also fixed `isles26.py`'s sampling-metadata pre-flight check, which
+  previously only ever looked at the original CSV regardless of which
+  sampling trainer was actually being launched.
+- **Verified but NOT run**: command construction confirmed via
+  `--print-only`, zero-volume-case weight share confirmed safe (0.6%, vs.
+  the original bug's 66%), original in-progress `sampling` run confirmed
+  undisturbed throughout. Deliberately not launched tonight -- would
+  contend with the GPU for the currently-running condition, same mistake
+  as the earlier backfill contention. Run later with
+  `python isles26.py train sampling-pow --dataset-id 1`.
+
+### Critical bug found and fixed mid-run: lesion-aware sampling weight collapse (2026-08-17)
+
+- **Bug:** `sampling_weights_from_volume`'s continuous inverse-volume formula
+  (`1/max(volume, floor=1.0mm3)`) is fragile against the real dataset's volume
+  scale (median lesion ~4600mm3). On the real run, the **3 zero-volume
+  (empty-mask) training cases alone captured 66% of all sampling
+  probability**, and the top 10 cases (out of 898) captured 74.5% -- the
+  network trained almost exclusively on a tiny near-empty subset and
+  collapsed to a "predict nothing" degenerate solution. Caught by noticing
+  Pseudo Dice pinned at exactly 0.0 for 96+ consecutive epochs (not slow
+  learning -- checked train_loss/val_loss were both moving, only Dice was
+  frozen at zero, which is the signature of an always-empty-prediction
+  collapse) while every other condition tonight showed real, improving Dice
+  from early epochs.
+- **Why this wasn't caught earlier:** the pre-launch smoke tests (sample
+  dataset, resume-logic verification) exercised `dice`/`nnUNetTrainer*`
+  trainers, never actually ran `nnUNetTrainerLesionAwareSampling` itself
+  through enough epochs to see its Pseudo Dice curve. Worth remembering for
+  next time: a mixin/logic bug in a trainer's `__init__` will surface
+  immediately on first instantiation (caught pre-launch, see below), but a
+  *data-dependent* bug like this one only surfaces once real epochs run
+  against the real data distribution -- smoke-testing on a 12-case sample
+  with only 3 empty-lesion cases dataset-wide didn't reproduce the
+  concentration effect at all.
+- **Fix:** replaced continuous inverse-volume weighting with **bin-level**
+  weighting (`sampling_weights_from_size_bin`, `metadata_utils.py`) -- every
+  case in the existing `small`/`medium`/`large` tertile bin gets the same
+  weight (4:2:1 ratio), so no single pathological case can dominate
+  regardless of how close to zero its volume is. Verified: zero-volume
+  cases' combined weight dropped from 66% to 0.5%, top-10 case concentration
+  from 74.5% to 1.7%.
+  `sampling_weights_from_volume` is kept in the file (unused) with a
+  docstring warning, for reference/comparison only -- do not use it.
+- **Recovery:** killed the in-progress (collapsed) training, moved its
+  checkpoint aside to `workspace/broken_sampling_run_backup/` (not deleted --
+  kept for reference), regenerated `workspace/case_metadata.csv`'s
+  `sampling_weight` column in place with the fix (backup at
+  `case_metadata.csv.bak-buggy-weights`). `run_full_experiment.sh`'s own
+  retry loop picked the condition back up automatically with no checkpoint
+  to resume from, so it started genuinely from epoch 0 with corrected
+  weights -- confirmed this was necessary: resuming from the collapsed
+  checkpoint would have continued training the already-broken model, not
+  fixed it.
+- **Verified fixed, not just theoretically**: watched the restarted run's
+  Pseudo Dice live epoch-by-epoch (0, 0, 0, 0.004, 0.12, 0.38 across epochs
+  0-5) -- climbing immediately, matching the healthy learning curve shape
+  every other condition showed, versus the original run's 96+ consecutive
+  epochs pinned at exactly 0.0.
 
 ### Critical bug found and fixed pre-launch: 250-epoch trainer __init__ signature (2026-08-17)
 

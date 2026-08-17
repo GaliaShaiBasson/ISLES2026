@@ -24,7 +24,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from metadata_utils import assign_size_bin, lesion_volume_mm3, sampling_weights_from_volume  # noqa: E402
+from metadata_utils import assign_size_bin, lesion_volume_mm3, sampling_weights_from_size_bin  # noqa: E402
 
 MODALITIES = ["T1"]
 
@@ -168,7 +168,7 @@ def build_metadata_dataframe(cases: dict[str, dict], label_paths: dict[str, str]
     if df.empty:
         return df
     df["size_bin"] = assign_size_bin(df["lesion_volume_mm3"])
-    df["sampling_weight"] = sampling_weights_from_volume(df["lesion_volume_mm3"])
+    df["sampling_weight"] = sampling_weights_from_size_bin(df["size_bin"])
 
     if supplemental:
         meta_df = pd.concat(supplemental, ignore_index=True, sort=False)

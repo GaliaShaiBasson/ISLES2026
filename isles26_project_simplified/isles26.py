@@ -9,7 +9,9 @@ variables or run platform-specific scripts.
 from __future__ import annotations
 
 import argparse
+import datetime
 import importlib.metadata
+import json
 import os
 import shlex
 import shutil
@@ -67,6 +69,7 @@ TRAINER_GROUPS = {
     "tversky": ["nnUNetTrainerTversky_250epochs"],
     "focal-tversky": ["nnUNetTrainerFocalTversky_250epochs"],
     "sampling": ["nnUNetTrainerLesionAwareSampling_250epochs"],
+    "sampling-pow": ["nnUNetTrainerLesionAwareSamplingPow_250epochs"],
     "debug": ["nnUNetTrainerDebugFast"],
 }
 
@@ -388,6 +391,202 @@ def cmd_preprocess(args: argparse.Namespace) -> int:
     return 0
 
 
+SAMPLING_METADATA_BY_TRAINER = {
+    # trainer class name -> (env var it reads, default path) for the sampling-weight CSV
+    # it loads at train time. Keyed by trainer so the fingerprint below can hash the
+    # actual weights a given run used, not just guess from the trainer name.
+    "nnUNetTrainerLesionAwareSampling_250epochs": (
+        "ISLES26_CASE_METADATA_CSV",
+        "workspace/case_metadata.csv",
+    ),
+    "nnUNetTrainerLesionAwareSamplingPow_250epochs": (
+        "ISLES26_SAMPLING_POW_METADATA_CSV",
+        "workspace/case_metadata_pow_p05.csv",
+    ),
+}
+
+
+def _splits_final_n_folds(dataset_id: int, dataset_name: str, env: dict[str, str]) -> int | str:
+    """Number of folds in the splits_final.json actually driving this dataset's training.
+
+    Not derivable from trainer/config/fold alone -- e.g. switching from our usual
+    single-fold split to a real 5-fold CV split reuses the same trainer/config/fold=0
+    for fold 0 of each, which would otherwise land in the identical nnU-Net output
+    folder. Read from nnUNet_preprocessed (what training actually uses), not the raw
+    copy, since that's the file do_split() reads.
+    """
+    path = Path(env["nnUNet_preprocessed"]) / f"Dataset{dataset_id:03d}_{dataset_name}" / "splits_final.json"
+    if not path.is_file():
+        return "unknown"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return len(data) if isinstance(data, list) else "unknown"
+    except (json.JSONDecodeError, OSError):
+        return "unknown"
+
+
+def _sampling_weight_hash(trainer: str, env: dict[str, str]) -> str | None:
+    """Short hash of a sampling trainer's actual (case_id, sampling_weight) pairs.
+
+    Ties run identity to the real weights content, not just a file path -- so
+    regenerating workspace/case_metadata_pow_p05.csv with a different --p (same
+    filename) is correctly seen as a different run, without requiring a new
+    trainer class or a manually-remembered CLI tag.
+    """
+    if trainer not in SAMPLING_METADATA_BY_TRAINER:
+        return None
+    import hashlib
+
+    env_var, default_path = SAMPLING_METADATA_BY_TRAINER[trainer]
+    csv_path = Path(env.get(env_var, default_path))
+    if not csv_path.is_file():
+        return "missing"
+    import csv as csv_module
+
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        reader = csv_module.DictReader(handle)
+        rows = sorted((row["case_id"], row["sampling_weight"]) for row in reader)
+    digest = hashlib.sha1(repr(rows).encode("utf-8")).hexdigest()
+    return digest[:10]
+
+
+_TRAINER_INTROSPECT_CODE = """
+import inspect, json, re, sys
+from nnunetv2.utilities.find_objects import recursive_find_trainer_class_by_name
+cls = recursive_find_trainer_class_by_name(sys.argv[1])
+info = {"num_epochs": None, "save_every": None}
+try:
+    src = inspect.getsource(cls.__init__)
+except (OSError, TypeError):
+    src = ""
+m = re.search(r"self\\.num_epochs\\s*=\\s*(\\d+)", src)
+if m:
+    info["num_epochs"] = int(m.group(1))
+m = re.search(r"self\\.save_every\\s*=\\s*(\\d+)", src)
+if m:
+    info["save_every"] = int(m.group(1))
+print(json.dumps(info))
+"""
+
+
+def _introspect_trainer(trainer: str, env: dict[str, str]) -> dict:
+    """Best-effort source-level introspection of a trainer's num_epochs/save_every.
+
+    Regex over inspect.getsource(cls.__init__) rather than instantiating the class --
+    real instantiation needs plans/dataset_json/fold that aren't available at this
+    point in the CLI. Catches the exact "hypothetical 500-epoch trainer" gotcha from
+    CLAUDE.md's decisions log without relying on the trainer's class *name* to say so:
+    if num_epochs can't be found in source (e.g. inherited unchanged), falls back to
+    nnU-Net's documented default of 1000.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", _TRAINER_INTROSPECT_CODE, trainer],
+        cwd=PROJECT_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return {"num_epochs": "unknown", "save_every": "unknown"}
+    try:
+        info = json.loads(result.stdout.strip().splitlines()[-1])
+    except json.JSONDecodeError:
+        return {"num_epochs": "unknown", "save_every": "unknown"}
+    if info.get("num_epochs") is None:
+        info["num_epochs"] = 1000  # nnU-Net's own default when a trainer never overrides it
+    if info.get("save_every") is None:
+        info["save_every"] = 50  # nnU-Net's own default
+    return info
+
+
+def compute_run_fingerprint(
+    trainer: str, dataset_id: int, dataset_name: str, configuration: str, fold: str, env: dict[str, str]
+) -> dict:
+    """Everything that actually determines this run's results, beyond what nnU-Net's own
+    output-folder naming (trainer/plans/config/fold) captures on its own.
+
+    This is the single source of truth for run identity used both to guard against
+    silently reusing/overwriting an nnU-Net checkpoint folder for an incompatible config
+    (see _guard_run_fingerprint) and to namespace our own results/evaluation output
+    (see run_id_from_fingerprint) -- so "does this collide" is answered the same way in
+    both places instead of two hand-maintained schemes drifting apart.
+    """
+    introspected = _introspect_trainer(trainer, env)
+    return {
+        "trainer": trainer,
+        "dataset": f"Dataset{dataset_id:03d}_{dataset_name}",
+        "configuration": configuration,
+        "fold": fold,
+        "n_folds_in_split": _splits_final_n_folds(dataset_id, dataset_name, env),
+        "num_epochs": introspected["num_epochs"],
+        "save_every": introspected["save_every"],
+        "sampling_weight_hash": _sampling_weight_hash(trainer, env),
+    }
+
+
+def run_id_from_fingerprint(fingerprint: dict) -> str:
+    """Short, human-browsable, collision-safe id for a run: readable prefix + content hash.
+
+    The hash (not the prefix) is what actually guarantees safety -- two runs only ever
+    share a run_id if every field in compute_run_fingerprint() is identical.
+    """
+    import hashlib
+
+    digest = hashlib.sha1(json.dumps(fingerprint, sort_keys=True).encode("utf-8")).hexdigest()[:10]
+    fold = fingerprint["fold"]
+    return f"{fingerprint['trainer']}__{fingerprint['configuration']}__fold{fold}__fp{digest}"
+
+
+def _fingerprint_diff(old: dict, new: dict) -> list[str]:
+    keys = sorted(set(old) | set(new))
+    return [f"{k}: {old.get(k)!r} -> {new.get(k)!r}" for k in keys if old.get(k) != new.get(k)]
+
+
+def _guard_run_fingerprint(output_folder: Path, fingerprint: dict, overwrite: bool) -> None:
+    """Refuse to let a changed hyperparameter silently reuse/overwrite an nnU-Net
+    checkpoint folder that nnU-Net itself would consider "the same" (identical
+    trainer/plans/config/fold), unless --overwrite is passed.
+
+    Without this, e.g. regenerating case_metadata_pow_p05.csv with a different --p, or
+    switching from a 1-fold to a 5-fold split, would resume/overwrite checkpoints for a
+    run with genuinely different settings -- nnU-Net's own folder naming can't see the
+    difference, only compute_run_fingerprint() can.
+    """
+    marker = output_folder / "isles26_fingerprint.json"
+    if not marker.is_file():
+        # First time training this exact nnU-Net folder (or a pre-fingerprint legacy
+        # run, e.g. tonight's overnight run): nothing to compare against -- adopt the
+        # current fingerprint as the folder's identity going forward.
+        output_folder.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps(fingerprint, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return
+
+    try:
+        stored = json.loads(marker.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        stored = {}
+
+    diff = _fingerprint_diff(stored, fingerprint)
+    if not diff:
+        return  # identical run -- normal resume/rerun, proceed as before
+
+    if not overwrite:
+        raise SystemExit(
+            f"{output_folder} already holds a run with different settings than what you're "
+            f"about to train (nnU-Net would silently reuse/overwrite it, since trainer/"
+            f"config/fold match). Changed field(s):\n  " + "\n  ".join(diff) +
+            "\nPass --overwrite to archive the old run and start fresh, or use a trainer "
+            "class name that doesn't collide with an existing one."
+        )
+
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    archived = output_folder.parent / f"{output_folder.name}.archived_{stamp}"
+    shutil.move(str(output_folder), str(archived))
+    print(f"[archive] Moved conflicting run aside (not deleted): {archived}")
+    output_folder.mkdir(parents=True, exist_ok=True)
+    marker.write_text(json.dumps(fingerprint, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def _copy_splits_final_json(env: dict[str, str], dataset_id: int, dataset_name: str) -> None:
     """Carry our custom splits_final.json (written by prepare) into nnUNet_preprocessed.
 
@@ -502,10 +701,20 @@ def cmd_train(args: argparse.Namespace) -> int:
         cmd_preprocess(preprocess_args)
 
     trainers = [args.trainer] if args.trainer else TRAINER_GROUPS[args.experiment]
-    if any(trainer.startswith("nnUNetTrainerLesionAwareSampling") for trainer in trainers):
-        metadata = Path(env["ISLES26_CASE_METADATA_CSV"])
+    # Each lesion-aware-sampling variant reads its own metadata CSV (distinct env var
+    # + default path per trainer -- see custom_trainers/nnUNetTrainerLesionAwareSampling.py)
+    # so concurrent variants never share or collide over one file. Check whichever file
+    # the specific trainer(s) being launched will actually read, not always the original.
+    for trainer_name in trainers:
+        if trainer_name not in SAMPLING_METADATA_BY_TRAINER:
+            continue
+        env_var, default_path = SAMPLING_METADATA_BY_TRAINER[trainer_name]
+        metadata = Path(env.get(env_var, default_path))
         if not metadata.is_file() and not args.print_only:
-            raise SystemExit(f"Sampling metadata is missing: {metadata}. Run `python isles26.py prepare` first.")
+            raise SystemExit(
+                f"Sampling metadata is missing for {trainer_name}: {metadata} "
+                f"(set via {env_var}). Generate it first."
+            )
 
     is_group_run = args.trainer is None and len(trainers) > 1
     skip_guard_active = (
@@ -514,6 +723,16 @@ def cmd_train(args: argparse.Namespace) -> int:
 
     for trainer in trainers:
         print(f"\n== {trainer} ==")
+        output_folder = _output_folder(trainer, dataset_id, dataset_name, configuration, fold, env)
+        if not args.print_only:
+            # Runs before the checkpoint skip-guard below: a hyperparameter change that
+            # nnU-Net's own folder naming can't see (num_epochs, sampling weights
+            # content, split fold count, ...) must be caught even when no
+            # checkpoint_final.pth exists yet (e.g. a stale partial run from a since-
+            # changed config). See compute_run_fingerprint/_guard_run_fingerprint.
+            fingerprint = compute_run_fingerprint(trainer, dataset_id, dataset_name, configuration, fold, env)
+            _guard_run_fingerprint(output_folder, fingerprint, args.overwrite)
+            print(f"[run_id] {run_id_from_fingerprint(fingerprint)}")
         if skip_guard_active:
             existing = _find_existing_checkpoint(trainer, dataset_id, dataset_name, configuration, fold, env)
             if existing is not None:
@@ -529,15 +748,83 @@ def cmd_train(args: argparse.Namespace) -> int:
     return 0
 
 
+def _git_commit() -> str | None:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, text=True, capture_output=True
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _write_run_manifest(run_dir: Path, fingerprint: dict, *, extra: dict) -> None:
+    """Provenance record next to a run's result CSVs -- lets later analysis/post-
+    processing (and you, months later) answer "what exactly produced this CSV"
+    without re-running anything: trainer, epoch budget, sampling weights hash, split
+    count, checkpoint identity, git commit, when it was evaluated.
+    """
+    manifest_path = run_dir / "run_manifest.json"
+    manifest = dict(fingerprint)
+    manifest.update(extra)
+    manifest["git_commit"] = _git_commit()
+    manifest["recorded_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def cmd_evaluate(args: argparse.Namespace) -> int:
+    if not args.trainer and not args.experiment:
+        raise SystemExit("evaluate needs either --trainer (recommended) or --experiment (legacy, manual runs).")
     env = build_environment()
     ensure_workspace(env)
     default_gt = Path(env["nnUNet_raw"]) / dataset_folder(env) / "labelsTr"
     gt_dir = Path(args.gt_dir).expanduser().resolve() if args.gt_dir else default_gt
-    out_dir = Path(env["ISLES26_RESULTS_DIR"])
-    out_dir.mkdir(parents=True, exist_ok=True)
-    slug = args.experiment.lower().replace(" ", "_").replace("/", "_")
-    out_csv = Path(args.out_csv).expanduser().resolve() if args.out_csv else out_dir / f"results_{slug}.csv"
+
+    fingerprint = None
+    run_dir = None
+    if args.trainer:
+        # Collision-safe path: namespace results by the same auto-fingerprint used to
+        # guard training output (see compute_run_fingerprint). Two evaluate calls only
+        # ever land in the same folder if every hyperparameter that matters (trainer,
+        # epoch budget, split fold count, sampling weights content, ...) is identical --
+        # so re-running the pipeline with unchanged settings safely lands on the same
+        # files (idempotent, no duplication), while changing anything automatically
+        # gets its own folder (no silent overwrite of a different run).
+        dataset_id = args.dataset_id or config_value(env, "ISLES26_DATASET_ID", int)
+        dataset_name = args.dataset_name or config_value(env, "ISLES26_DATASET_NAME")
+        configuration = args.configuration or config_value(env, "ISLES26_CONFIGURATION")
+        fold = str(args.fold if args.fold is not None else config_value(env, "ISLES26_FOLD"))
+        fingerprint = compute_run_fingerprint(args.trainer, dataset_id, dataset_name, configuration, fold, env)
+        rid = run_id_from_fingerprint(fingerprint)
+        run_dir = Path(env["ISLES26_RESULTS_DIR"]) / "runs" / rid
+        split = args.split or "results"
+        experiment_name = args.experiment or args.trainer
+        out_csv = Path(args.out_csv).expanduser().resolve() if args.out_csv else run_dir / f"results_{split}.csv"
+        checkpoint_dir = _output_folder(args.trainer, dataset_id, dataset_name, configuration, fold, env)
+    else:
+        # Legacy/manual path (no --trainer): unchanged flat workspace/evaluation/ layout,
+        # for one-off ad-hoc evaluate calls that aren't part of the tracked experiment grid.
+        out_dir = Path(env["ISLES26_RESULTS_DIR"])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        slug = args.experiment.lower().replace(" ", "_").replace("/", "_")
+        out_csv = Path(args.out_csv).expanduser().resolve() if args.out_csv else out_dir / f"results_{slug}.csv"
+        experiment_name = args.experiment
+        checkpoint_dir = None
+
+    if out_csv.is_file() and not args.print_only:
+        if not args.overwrite:
+            print(
+                f"[skip] {out_csv} already exists"
+                + (f" for run {rid}" if run_dir is not None else "")
+                + " -- nothing to redo. Pass --overwrite to recompute (archives the old file first)."
+            )
+            return 0
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        archive_dir = (run_dir if run_dir is not None else out_csv.parent) / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        archived = archive_dir / f"{stamp}_{out_csv.name}"
+        shutil.move(str(out_csv), str(archived))
+        print(f"[archive] Moved previous result aside (not deleted): {archived}")
+
+    if run_dir is not None:
+        run_dir.mkdir(parents=True, exist_ok=True)
 
     if args.case_metadata_csv:
         case_metadata_csv = args.case_metadata_csv
@@ -552,17 +839,18 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
             )
             case_metadata_csv = env["ISLES26_CASE_METADATA_CSV"]
 
+    pred_dir = Path(args.pred_dir).expanduser().resolve()
     command = [
         sys.executable,
         str(PROJECT_ROOT / "evaluation" / "compute_metrics.py"),
         "--pred-dir",
-        str(Path(args.pred_dir).expanduser().resolve()),
+        str(pred_dir),
         "--gt-dir",
         str(gt_dir),
         "--case-metadata-csv",
         case_metadata_csv,
         "--experiment-name",
-        args.experiment,
+        experiment_name,
         "--out-csv",
         str(out_csv),
         "--lesion-connectivity",
@@ -571,7 +859,60 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         str(args.min_lesion_voxels),
     ]
     run_command(command, env, args.print_only)
+
+    if run_dir is not None and not args.print_only:
+        checkpoint_final = checkpoint_dir / "checkpoint_final.pth" if checkpoint_dir else None
+        _write_run_manifest(
+            run_dir,
+            fingerprint,
+            extra={
+                "run_id": rid,
+                "split": split,
+                "experiment_name": experiment_name,
+                "pred_dir": str(pred_dir),
+                "gt_dir": str(gt_dir),
+                "case_metadata_csv": case_metadata_csv,
+                "checkpoint_final": str(checkpoint_final) if checkpoint_final and checkpoint_final.is_file() else None,
+                "checkpoint_final_mtime": (
+                    datetime.datetime.fromtimestamp(checkpoint_final.stat().st_mtime).isoformat(timespec="seconds")
+                    if checkpoint_final and checkpoint_final.is_file()
+                    else None
+                ),
+            },
+        )
     return 0
+
+
+def _write_runs_index(scan_dir: Path, out_csv: Path) -> None:
+    """Catalog every run's manifest into one flat CSV -- trainer, epoch budget,
+    sampling weights hash, split fold count, checkpoint identity, git commit, when
+    it ran -- so runs can be compared/audited without opening each JSON file or
+    re-running anything.
+    """
+    import csv as csv_module
+
+    manifests = sorted((scan_dir / "runs").glob("*/run_manifest.json"))
+    if not manifests:
+        return
+    rows = []
+    fieldnames: list[str] = []
+    for path in manifests:
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        rows.append(row)
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
+    if not rows:
+        return
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with out_csv.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv_module.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"Wrote {len(rows)} run(s) to {out_csv}")
 
 
 def cmd_aggregate(args: argparse.Namespace) -> int:
@@ -581,7 +922,10 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
     scan_dir = Path(env["ISLES26_RESULTS_DIR"]) if not args.out_dir else results_dir
     inputs = [Path(p).expanduser().resolve() for p in args.result_csvs]
     if not inputs:
-        inputs = sorted(scan_dir.glob("results_*.csv"))
+        # Flat legacy layout (workspace/evaluation/results_*.csv) plus the collision-safe
+        # nested layout (workspace/evaluation/runs/<run_id>/results_*.csv) -- both are
+        # picked up so existing results from before this layout existed keep working.
+        inputs = sorted(scan_dir.glob("results_*.csv")) + sorted(scan_dir.glob("runs/*/results_*.csv"))
         inputs = [p for p in inputs if p.name != "results.csv"]
     if not inputs:
         raise SystemExit(f"No per-experiment result CSVs found in {scan_dir}")
@@ -600,6 +944,8 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
         str(results_dir / "summary_by_split.csv"),
     ]
     run_command(command, env, args.print_only)
+    if not args.print_only:
+        _write_runs_index(scan_dir, results_dir / "runs_index.csv")
     return 0
 
 
@@ -703,9 +1049,34 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("evaluate", help="Compute per-case Dice, HD95, and lesion-wise F1 for one prediction folder")
     p.add_argument("--pred-dir", required=True)
-    p.add_argument("--experiment", required=True)
+    p.add_argument(
+        "--trainer",
+        default=None,
+        help=(
+            "Trainer class that produced --pred-dir. Recommended: namespaces output under "
+            "workspace/evaluation/runs/<auto-fingerprint>/ (collision-safe across epoch "
+            "count, sampling weights, split fold count, etc. -- see CLAUDE.md) and writes "
+            "a run_manifest.json with full provenance. Omit only for one-off/manual runs "
+            "(falls back to the flat --experiment-named legacy layout)."
+        ),
+    )
+    p.add_argument("--split", default=None, help="val/test/train/etc. -- used with --trainer to name results_<split>.csv")
+    p.add_argument("--dataset-id", type=int, help="Used with --trainer; default: ISLES26_DATASET_ID")
+    p.add_argument("--dataset-name", help="Used with --trainer; default: ISLES26_DATASET_NAME")
+    p.add_argument("--configuration", help="Used with --trainer; default: ISLES26_CONFIGURATION")
+    p.add_argument("--fold", help="Used with --trainer; default: ISLES26_FOLD")
+    p.add_argument(
+        "--experiment",
+        default=None,
+        help="Label stored in the 'experiment' column / used for the legacy filename. Defaults to --trainer.",
+    )
     p.add_argument("--gt-dir")
     p.add_argument("--out-csv")
+    p.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Recompute even if the target result CSV already exists (archives the old one first, not deleted)",
+    )
     p.add_argument(
         "--case-metadata-csv",
         default=None,

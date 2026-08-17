@@ -107,13 +107,18 @@ for group in "${ORDER[@]}"; do
     -d "$DATASET_ID" -c "$CONFIG" -tr "$trainer" -f "$FOLD" \
     || log "[FAIL] predict $group"
 
+  # --trainer (not --experiment/--out-csv) namespaces output under an auto
+  # fingerprint of trainer+config+fold+epoch-budget+split-fold-count+sampling-weights
+  # -- collision-safe even if this script is reused unmodified for a different
+  # hyperparameter variant later (see CLAUDE.md "run identity" entry). Re-running an
+  # unchanged condition just skips (idempotent); --overwrite would archive + redo.
   log "--- evaluate $group (val) ---"
   $PY isles26.py evaluate \
     --pred-dir "$out_folder/validation" \
     --gt-dir "$nnUNet_raw/Dataset001_ATLAS/labelsTr" \
     --case-metadata-csv "$MANIFEST" \
-    --experiment "${group}_val" \
-    --out-csv "workspace/evaluation/results_${group}_val.csv" \
+    --trainer "$trainer" --dataset-id "$DATASET_ID" --configuration "$CONFIG" --fold "$FOLD" \
+    --split val \
     || log "[FAIL] evaluate ${group}_val"
 
   log "--- evaluate $group (held-out test) ---"
@@ -121,8 +126,8 @@ for group in "${ORDER[@]}"; do
     --pred-dir "$pred_dir" \
     --gt-dir "$nnUNet_raw/Dataset001_ATLAS/labelsTs" \
     --case-metadata-csv "$MANIFEST" \
-    --experiment "${group}_test" \
-    --out-csv "workspace/evaluation/results_${group}_test.csv" \
+    --trainer "$trainer" --dataset-id "$DATASET_ID" --configuration "$CONFIG" --fold "$FOLD" \
+    --split test \
     || log "[FAIL] evaluate ${group}_test"
 
   reaggregate
