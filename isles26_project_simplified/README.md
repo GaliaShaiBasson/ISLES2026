@@ -1,12 +1,23 @@
 # Stroke-lesion segmentation experiments with nnU-Net v2
 
-This revision keeps the original research plan but replaces the platform-specific, multi-script workflow with one cross-platform command:
+ISLES'26/ATLAS lesion segmentation: one baseline, a controlled loss study,
+lesion-size-aware sampling, and stratified (in-distribution vs.
+out-of-distribution site) evaluation, on top of a hardened nnU-Net
+operational layer — one cross-platform command instead of the original
+platform-specific, multi-script workflow:
 
 ```bash
 python isles26.py --help
 ```
 
-The historical project name says ISLES'26, while the supplied converter targets the **ATLAS R2.1** folder layout. That distinction is now explicit. Do not point the converter at a different challenge dataset without adapting its discovery rules.
+The historical project name says ISLES'26; the converter targets the
+**ATLAS R3.0 raw** folder layout (native-space, skull-stripped data — see
+`CLAUDE.md`). Do not point the converter at a different challenge dataset
+without adapting its discovery rules.
+
+See `PROJECT_PLAN.md` for current run status and what's left before the
+report is due, and `CLAUDE.md` for the decisions log (*why* things deviate
+from nnU-Net/project defaults).
 
 ## Setup
 
@@ -14,7 +25,7 @@ Create and activate a Python 3.10+ virtual environment. Install the PyTorch buil
 
 ```bash
 python -m pip install -r requirements.txt
-python isles26.py init --raw-root "/path/to/ATLAS_R2.1_raw"
+python isles26.py init --raw-root "/path/to/ATLAS_R3.0_raw"
 python isles26.py doctor --create-dirs --require-raw
 ```
 
@@ -30,7 +41,15 @@ The runner loads those paths for each child process. You no longer need permanen
 
 ## Typical workflow
 
-First inspect what the converter finds:
+Generate the train/val/test_id/test_ood split first (replaces nnU-Net's
+default unstratified 5-fold CV — see `CLAUDE.md` for why):
+
+```bash
+python data_prep/split_dataset.py --raw-root "/path/to/ATLAS_R3.0_raw" --out-dir workspace/splits
+```
+
+Do not proceed past this step until `broken_cases.csv` is small/stable.
+Then inspect what the converter finds:
 
 ```bash
 python isles26.py prepare --dry-run
@@ -105,7 +124,8 @@ custom_trainers/                   loss, sampling, and debug trainers
 evaluation/                        metrics and aggregation
 analysis/                          report figures
 training/                          compatibility wrappers for old commands
-PROJECT_REVIEW.md                  findings and changes from the review
+PROJECT_PLAN.md                    current run status, what's left before the report
+CLAUDE.md                          decisions log (why things deviate from defaults)
 ```
 
 ## Important validation limits

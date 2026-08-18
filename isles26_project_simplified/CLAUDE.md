@@ -24,6 +24,14 @@ condition, an ETA to finish training, whether the driver script and
 ./check_status.sh <path-to-log>    # a specific run's log
 ```
 
+## Standing constraint: nnU-Net version is pinned, not just a dependency choice
+
+Custom trainers rely on nnU-Net 2.8.1 internals (constructor signatures, deep
+supervision weighting details — see "Foundational hardening pass" below).
+`nnunetv2==2.8.1` is pinned deliberately. Upgrading nnU-Net is a code change
+to this project, not a routine dependency bump — revalidate every custom
+trainer against the new internals before trusting results from it.
+
 ## Working agreement
 
 1. **Ask before assuming architectural placement.** Where a new script/module
@@ -50,6 +58,45 @@ condition, an ETA to finish training, whether the driver script and
 ## Decisions log
 
 Newest first. Each entry: decision, rationale, where it's implemented.
+
+### Foundational hardening pass (baseline, predates the dated entries below)
+
+A review of the original operational layer found it required several
+environment variables, duplicated Bash/PowerShell scripts, manual custom-
+trainer installation into `site-packages`, and hand-built evaluation
+commands. Fixed as a batch, before per-decision dated entries started:
+
+- **Debug trainer was incompatible with current nnU-Net.** Its constructor
+  passed `unpack_dataset`, not accepted by nnU-Net 2.8.1 — fixed to match
+  the current constructor signature.
+- **Lesion-aware sampling patched the wrong object.** The parent method
+  returns an augmenter after worker startup, not the raw loader that owns
+  case indices — fixed to inject `sampling_probabilities` while the
+  training loader is constructed (distinct from the later data-dependent
+  weight-collapse bug below — this was a wiring bug, not a weighting-
+  formula bug).
+- **Custom trainers were installed into `site-packages`** (brittle across
+  reinstalls/venvs) — switched to `nnUNet_extTrainer` so project code stays
+  in the project.
+- **Project identity was ambiguous**: named ISLES'26 but the converter and
+  examples targeted ATLAS R2.1. Startup flow and converter docs now state
+  the actual data source explicitly (see "Data source: ATLAS R3.0" below).
+- **Data-prep file had duplicated module headers/imports** — reduced to one
+  implementation with explicit path validation, duplicate case-ID checks,
+  and safe overwrite behavior.
+- **Correctness/robustness fixes bundled into the same pass:** pinned
+  `nnunetv2==2.8.1` (was "any version newer than 2.4"); mirrored nnU-Net
+  2.8.1's deep-supervision weighting incl. its DDP workaround; fixed
+  ignore-label handling so positive ignore labels can't cause one-hot
+  indexing failures; made focal-loss alpha class-specific for the binary
+  case instead of a constant multiplier; made lesion-size binning work with
+  small datasets and repeated lesion volumes; added prediction/ground-truth
+  shape+affine checks before metric computation (this is the check that
+  later caught the real `ATLAS_r028s017_ses1` affine mismatch, see
+  "Full pipeline smoke test" entry below); made evaluation fail clearly on
+  zero cases evaluated; added duplicate-row checks during aggregation;
+  excluded non-positive lesion volumes from log-scale plots; removed unused
+  direct dependencies.
 
 ### Optimizing GPU usage: investigated, no free lever found -- leave as-is (2026-08-18)
 

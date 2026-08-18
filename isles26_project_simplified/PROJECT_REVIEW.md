@@ -4,37 +4,7 @@
 
 The research structure is coherent: one baseline, a focused loss study, lesion-size-aware sampling, and stratified evaluation. The original operational layer was the weak point. It required several environment variables, duplicated Bash and PowerShell scripts, manual custom-trainer installation, and hand-built evaluation commands.
 
-## High-impact findings
 
-1. **The debug trainer was incompatible with current nnU-Net.** Its constructor included `unpack_dataset`, which is not accepted by nnU-Net 2.8.1. The revised trainer uses the current constructor signature.
-
-2. **Lesion-aware sampling patched the wrong object.** The parent method returns an augmenter after worker startup, not the raw loader that owns case indices. The previous patch would either fail on missing attributes or fail to affect worker sampling. The revised trainer injects `sampling_probabilities` while the underlying training loader is constructed.
-
-3. **Custom trainers were copied into `site-packages`.** This is brittle across reinstalls and virtual environments. The revised runner uses `nnUNet_extTrainer`, so project code remains in the project.
-
-4. **The data identity was ambiguous.** The project is named ISLES'26, but the actual converter and examples target ATLAS R2.1. The converter documentation and startup flow now state this explicitly.
-
-5. **The data-preparation file contained duplicated module headers and imports.** It has been reduced to one implementation with explicit path validation, duplicate case-ID checks, and safe overwrite behavior.
-
-## Correctness and robustness changes
-
-- Pinned `nnunetv2==2.8.1` instead of accepting any version newer than 2.4.
-- Mirrored nnU-Net 2.8.1's deep-supervision weighting, including its DDP workaround.
-- Corrected ignore-label handling so positive ignore labels cannot cause one-hot indexing failures.
-- Made focal-loss alpha class-specific for the binary case instead of a constant multiplier.
-- Made lesion-size binning work with small datasets and repeated lesion volumes.
-- Added prediction/ground-truth shape and affine checks before metric computation.
-- Made evaluation fail clearly when zero cases are evaluated.
-- Added duplicate-row checks during aggregation.
-- Excluded non-positive lesion volumes from log-scale plots.
-- Removed unused direct dependencies.
-
-## Remaining risks
-
-- The ATLAS discovery patterns still need confirmation against the exact dataset download.
-- The custom trainers are intentionally pinned to nnU-Net 2.8.1 internals. Upgrading nnU-Net should be treated as a code change and revalidated.
-- Inverse lesion-volume sampling can heavily overweight the smallest cases. The resulting probability distribution should be inspected before interpreting the experiment.
-- A single fold is useful for iteration but insufficient for strong claims. Keep folds and splits identical across methods.
 
 #==========================================================#
 
@@ -106,3 +76,82 @@ generative/fine-tuning, is not applicable here). Full deck:
    "don't average weights." Low priority (nnU-Net already tracks a
    pseudo-Dice EMA for checkpoint selection) but a real omission if chasing
    additional Dice cheaply.
+
+### Recommended before the next overnight run (2026-08-18, ~2-3h budget, 2-3 conditions max)
+
+Ranked by value-per-minute and risk to an unattended run. Context: dataset002
+500-epoch run had baseline/focal-tversky/tversky-mild done and sampling-500
+finishing (epoch 418/500); going forward, runs are being capped at 2-3
+conditions instead of running every variant every time.
+
+1. **Overfit-tiny-subset sanity gate (30-45 min), do first.** A script/trainer
+   variant that trains on a fixed 8-16 case subset until loss ≈ 0, run
+   against whichever 2-3 trainers are picked for that night before the real
+   launch. This is the one check that would have caught the Aug 17
+   sampling-collapse bug hours earlier instead of after 96 wasted epochs —
+   cheapest insurance against burning a whole night on a wiring bug in a
+   newly-touched trainer. Directly closes gap 3 above.
+2. **Prediction ensembling on already-finished checkpoints (45-60 min), zero
+   risk, can run in parallel with training.** baseline-500 /
+   focal-tversky-500 / tversky-mild-500 are already done and sampling-500 is
+   about to finish — 4 real checkpoints already on disk. A simple
+   softmax-averaging step in `evaluation/` over these gets free Dice on top
+   of a study already paid for, without touching that night's GPU
+   allocation at all. Directly closes gap 1 above.
+3. **Widened-augmentation variant as one of the 2-3 nightly conditions
+   (remaining time).** The one substantive open question from the "future
+   considerations" section below — brightness/contrast/gamma ranges are
+   still nnU-Net's generic mild defaults, not chosen for this dataset's
+   cross-center generalization goal, and already scoped there as "try this
+   first, cheap, one afternoon" before anything adversarial.
+
+**Explicitly deferred**, not because they're wrong, but because they need
+their own controlled validation before trusting on an unattended run and
+don't fit a 2-3h prep window: LR/weight-decay/optimizer changes (gap 2), and
+EMA/SWA (gap 5).
+
+### Update (2026-08-18): two runs remain, not one — tonight and tomorrow night (final, presentation-bound)
+
+baseline-500 / focal-tversky-500 / tversky-mild-500 / sampling-500 (plain
+4:2:1) are already done at 500 epochs on the full `Dataset002_ATLAS`.
+Tomorrow night's run is the real final one — results and everything needed
+to report on them must be ready for the presentation right after it finishes,
+so there's no engineering time left once it lands. That splits the remaining
+work into two buckets:
+
+**Tonight's run (after the 2-3h prep window, once `sampling-500` finishes):**
+
+1. **Overfit-tiny-subset sanity gate, build first.** Run it against both new
+   trainers below before launching either — neither has been exercised
+   through real epochs yet, and this is exactly the check that would have
+   caught the 2026-08-17 sampling-collapse bug before it wasted GPU time.
+2. **`sampling-pow` at 500ep/dataset002.** Closes the question CLAUDE.md
+   itself raised on 2026-08-17: plain 4:2:1 sampling showed "real cost,
+   marginal/unclear benefit" by size bin, and `sampling-pow` (p=0.5,
+   sqrt-dampened correction) was built as "the next informative data point"
+   to tell "sampling doesn't help here" apart from "4:2:1 was too weak to
+   show it." Implemented and verified, but only ever run at 250
+   epochs/dataset001 — needs porting to 500ep/dataset002 to match the rest
+   of the study.
+3. **Widened-augmentation variant, built on `baseline` (Dice+CE), not the
+   best-performing condition.** Chosen deliberately for a clean A/B:
+   `baseline-500` vs. `baseline-500` + wider brightness/contrast/gamma (+
+   possibly elastic deformation, currently disabled) isolates augmentation's
+   effect on the `test_id`/`test_ood` gap without confounding it with a loss
+   or sampling choice — the most direct next step on the anomaly below.
+
+**Must exist *before* tomorrow night's run lands, so results→report has zero
+engineering gap** (build in parallel, doesn't need GPU):
+
+4. **Prediction ensembling in `evaluation/`.** Softmax-averaging across the
+   final set of checkpoints — ready to apply the moment tomorrow's run
+   finishes, not something to build afterward under presentation pressure.
+5. **Per-site `test_ood` breakdown in `aggregate_results.py`/
+   `plot_results.py`.** CLAUDE.md (2026-08-17): `test_ood` Dice ≥ `test_id`
+   Dice in *every* condition so far — the opposite of ISLES'26's motivating
+   premise — flagged as "worth investigating per-site... before writing this
+   up." Currently only stratified by `size_bin` and pooled `split`. Needs to
+   exist before tomorrow's results are the ones going in the report.
+6. **Single-fold limitation stays a stated caveat, not a fix.** Already
+   flagged under "Remaining risks" above — write it into the final report
+   explicitly, since there's no follow-up run left to caveat it in later.
