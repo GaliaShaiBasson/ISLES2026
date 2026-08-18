@@ -28,7 +28,7 @@ import torch
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 
 from .nnUNetTrainerLossVariants import nnUNetTrainerFocalTversky, nnUNetTrainerTverskyMild
-from .nnUNetTrainerLesionAwareSampling import nnUNetTrainerLesionAwareSampling
+from .nnUNetTrainerLesionAwareSampling import nnUNetTrainerLesionAwareSampling, nnUNetTrainerLesionAwareSamplingPow
 
 
 class _Epochs500Mixin:
@@ -98,3 +98,25 @@ class nnUNetTrainerLesionAwareSampling_500epochs_full(_Epochs500Mixin, nnUNetTra
 
     CASE_METADATA_CSV_ENV_VAR = "ISLES26_CASE_METADATA_CSV_FULL"
     CASE_METADATA_CSV_DEFAULT = "workspace/case_metadata_full.csv"
+
+
+class nnUNetTrainerLesionAwareSamplingPow_500epochs_full(_Epochs500Mixin, nnUNetTrainerLesionAwareSamplingPow):
+    """Power-law (p=0.5) bin-level sampling at the 500-epoch budget, dataset002.
+
+    Re-tested here specifically on the test_ood angle, not the val-Dice angle that
+    argued against the pow variant at 250 epochs/dataset001 (see CLAUDE.md): plain
+    4:2:1 sampling's own 500-epoch/dataset002 result had the *worst* val Dice of the
+    4 conditions run so far but the *best* test_ood Dice (0.6769, edging out baseline's
+    0.6764) -- an odd but real split on exactly the metric this project is about.
+    p=0.5 is a stronger size-bin correction than 4:2:1 (grounded in the real per-bin
+    foreground-volume imbalance -- see metadata_utils.sampling_weights_from_size_bin_power
+    and the 2026-08-17 CLAUDE.md entry); this asks whether a stronger correction pushes
+    test_ood further, or whether 4:2:1's OOD result was noise.
+
+    Metadata CSV isolation: reads workspace/case_metadata_pow_p05_full.csv (generated
+    from case_metadata_full.csv via data_prep/generate_pow_sampling_metadata.py --p 0.5),
+    never the plain 4:2:1 file above and never the 250-epoch/dataset001 pow file --
+    three separate sampling-weight CSVs, three separate trainers, no shared state.
+    """
+
+    pass

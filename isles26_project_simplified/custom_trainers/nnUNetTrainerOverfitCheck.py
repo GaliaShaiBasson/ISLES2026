@@ -99,6 +99,7 @@ class _OverfitCheckMixin:
 
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer  # noqa: E402
 
+from .nnUNetTrainerLesionAwareSampling import nnUNetTrainerLesionAwareSamplingPow  # noqa: E402
 from .nnUNetTrainerWideAug import nnUNetTrainerWideAug  # noqa: E402
 
 
@@ -123,6 +124,22 @@ class nnUNetTrainerBaseline_OverfitCheck(_OverfitCheckMixin, nnUNetTrainer):
     the identical cases; if it ALSO shows a flat/near-zero Pseudo Dice trend, the flat
     result is explained by the short budget/tiny-n interaction, not by anything specific
     to nnUNetTrainerWideAug's overridden ``get_training_transforms``.
+    """
+
+    pass
+
+
+class nnUNetTrainerLesionAwareSamplingPow_OverfitCheck(_OverfitCheckMixin, nnUNetTrainerLesionAwareSamplingPow):
+    """Gate for nnUNetTrainerLesionAwareSamplingPow_500epochs_full before queuing it tonight.
+
+    Tests the actually-new wiring (epoch mixin + dataset002-specific metadata CSV path),
+    not the sampling-injection mechanism itself (already proven live in tonight's
+    finished sampling-500 run). Needs a pow-weighted metadata CSV for Dataset999's own
+    case IDs, which is NOT the dataset002 default this trainer normally reads --
+    override at invocation time:
+
+      ISLES26_SAMPLING_POW_METADATA_CSV_FULL=workspace/sample_run/case_metadata_pow_p05.csv \\
+        python isles26.py train overfit-check-samplingpow --dataset-id 999 --dataset-name ATLASsample
     """
 
     pass

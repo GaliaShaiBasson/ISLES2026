@@ -129,3 +129,23 @@ class nnUNetTrainerLesionAwareSamplingPow_250epochs(nnUNetTrainerLesionAwareSamp
 
     CASE_METADATA_CSV_ENV_VAR = "ISLES26_SAMPLING_POW_METADATA_CSV"
     CASE_METADATA_CSV_DEFAULT = "workspace/case_metadata_pow_p05.csv"
+
+
+class nnUNetTrainerLesionAwareSamplingPow(nnUNetTrainerLesionAwareSampling):
+    """Power-law (p=0.5) bin-level sampling weights, with NO epoch-budget mixin baked in --
+    combine with whichever epoch mixin the target run needs (mirrors how
+    nnUNetTrainerLesionAwareSampling itself has no epoch mixin, and
+    nnUNetTrainerLesionAwareSampling_500epochs_full combines it with
+    _Epochs500Mixin in nnUNetTrainer500epochs.py).
+
+    Exists as a separate class from nnUNetTrainerLesionAwareSamplingPow_250epochs
+    (which bakes in the 250-epoch mixin directly) rather than reusing it, so a
+    500-epoch/dataset002 variant doesn't have to fight an already-baked-in 250-epoch
+    __init__. Own dedicated env var/default (case_metadata_pow_p05_full.csv, matching
+    dataset002's "_full" metadata-file naming convention -- see
+    nnUNetTrainerLesionAwareSampling_500epochs_full) so it can never collide with the
+    250-epoch/dataset001 pow file above, even though both are the same p=0.5 formula.
+    """
+
+    CASE_METADATA_CSV_ENV_VAR = "ISLES26_SAMPLING_POW_METADATA_CSV_FULL"
+    CASE_METADATA_CSV_DEFAULT = "workspace/case_metadata_pow_p05_full.csv"
