@@ -74,6 +74,46 @@ at 500 epochs on `Dataset002_ATLAS` before either of these two nights.
   (p=0.5, sqrt-dampened correction) only ever ran at 250 epochs /
   `Dataset001` — never ported to 500 epochs / `Dataset002` to match the
   rest of the study.
+- **Tonight, also landed: connected-component post-processing.**
+  `evaluation/postprocess_predictions.py` — drops predicted connected
+  components below `--min-voxels` (26-connected by default, matching
+  `lesion_wise_f1`), writes filtered masks to a new directory, never
+  touches the source predictions (hard-guarded: refuses if `--out-dir`
+  is or contains `--pred-dir`). Motivation and a real early result: a
+  manual test on `DiceOnly_250epochs`/`Dataset001` (258 test cases,
+  ground truth recovered from the archived raw dataset) found
+  `--min-voxels 10` left Dice essentially unchanged (+0.0002) and
+  improved lesion-wise F1 (+0.035, fewer phantom predicted lesions), but
+  made mean HD95 *worse* (+0.35mm) — some "small" components turned out
+  to be genuine diagonally-attached satellite lesion fragments, not
+  noise, so a single hand-picked threshold isn't safe without tuning.
+  Queued to search this properly and run fully unattended overnight
+  (2026-08-18→19), behind the GPU pipeline so it never contends for GPU
+  or CPU with real training:
+  - `run_postprocess_grid.sh` — 20 combos (`min_voxels` ∈
+    {1,2,3,4,5,6,8,10,15,20} × `connectivity` ∈ {1,3}; `min_voxels=1` is
+    the raw/no-op control) filtered + scored **only** against
+    `baseline-500`'s own internal validation predictions (120 cases,
+    `fold_0/validation/` vs `labelsTr`) — deliberately never against
+    `predTs` (test_id+test_ood) during the search itself, to avoid tuning
+    on the held-out test set. Auto-selects the combo with the lowest val
+    mean HD95 (dice as tiebreaker), writes `selected_combo.json`, then
+    applies that one frozen combo to `predTs` (250 cases) vs `labelsTs`
+    exactly once, alongside a raw/unfiltered `predTs` scoring for a direct
+    before/after row.
+  - `queue_postprocess_after_samplingpow.sh` — waits for
+    `/tmp/queue_samplingpow.sh` (sampling-pow-500 train → predict →
+    evaluate → aggregate → plot, itself queued behind `wideaug-500`) to
+    fully exit before starting the grid, per explicit request — keeps the
+    whole night's GPU pipeline and this CPU-only grid from ever running
+    concurrently, even though the grid itself never touches the GPU.
+  - Results to check on wake-up: `workspace/postprocess_grid/baseline500/
+    grid_summary_val.csv` (all 20 combos), `selected_combo.json` (winner +
+    selection rule), `test_final/results_*_test.csv` (frozen before/after
+    on held-out test). Every combo's output is self-describing (a
+    `*_config.json` with its params next to its filtered masks) and
+    indexed by `grid_manifest.csv`, so any folder is traceable back to its
+    exact `(min_voxels, connectivity)` combination.
 - **Tomorrow night is the real final run** — whatever it produces is what
   goes in the report, with no engineering time left afterward. Everything
   in "Report deliverables" below, except ensembling, must be ready
@@ -136,6 +176,12 @@ saved anywhere by nnU-Net during training, unlike the per-epoch curves above.
 Now captured in both the trainer's code and this reusable script — no more
 urgency, can be regenerated for other cases anytime.
 
+**In progress (2026-08-18→19, running overnight):** connected-component
+post-processing grid search — see the "Tonight, also landed" entry above
+for the script names, method, and where to find results. Gives the report
+a real Methods-section post-processing step (with its own before/after
+Experiments-section row) beyond what was already scoped here.
+
 **Explicitly deferred:** prediction ensembling and anything built on it — the
 one thing intentionally left for after tomorrow night's run.
 Domain-adversarial training (gradient-reversal on encoder features) — a
@@ -181,3 +227,33 @@ same fold for every method (see the controlled-comparison rules above).
   never revisited as a deliberate lever.
 - EMA/SWA weight averaging — not implemented; low priority since nnU-Net
   already tracks a pseudo-Dice EMA for checkpoint selection.
+- **Learned post-processing network** (discussed 2026-08-19, not
+  implemented) — a second, sequential model that decides which predicted
+  connected components to keep, instead of one hand-picked
+  `--min-voxels` threshold. Motivated directly by the finding above: a
+  size-only cutoff can't distinguish real satellite lesion fragments from
+  spurious blobs, and the grid search only covers a 1D/2D hyperparameter
+  space (size × connectivity), not the richer per-component signal
+  (predicted-probability confidence, shape, distance to other components)
+  a learned decision could use. Three options discussed, cheapest first:
+  1. **Tabular classifier over per-component features** (voxel count,
+     mean/max softmax probability, shape/compactness, distance to nearest
+     other component) — logistic regression or gradient-boosted trees,
+     trained on val-set components labeled by real overlap with ground
+     truth. CPU-only, no GPU contention, buildable without touching the
+     training pipeline — the only one of the three realistic to attempt
+     before the report deadline, if pursued at all.
+  2. **Small 3D patch CNN classifier** centered on each component
+     (image + probability-map crop → keep/discard) — the "false-positive
+     reduction network" pattern from candidate-based lesion/nodule
+     detection (e.g. LUNA16-style pipelines). More powerful than (1), but
+     needs real GPU training time and its own train/val discipline.
+  3. **Full cascade/refinement segmentation network** — a second full
+     model taking `[image, stage-1 predicted mask]` as input and
+     outputting a refined mask (nnU-Net has this built in as
+     `3d_cascade_fullres`). Most powerful, but GPU-cost comparable to
+     adding a whole extra condition to the study.
+  Whichever is pursued later: it must be trained/tuned on `val`-derived
+  components only, same discipline as the grid search above — never on
+  `test_id`/`test_ood` components, or it leaks into the generalization
+  claim the whole `test_ood` split exists to protect.
