@@ -116,11 +116,25 @@ discussion; graphs/tables/figures throughout.
    Methods-section figure once `sampling-pow-500` metadata exists (blocked
    on the "not done" item above).
 
-**Time-sensitive — capture now, while `wideaug` is fresh, or it needs
-re-deriving the exact augmentation config to reproduce:** a handful of
-before/after example slices showing what the widened augmentation does to an
-input volume (stock nnU-Net vs. widened ranges). Not saved anywhere by
-nnU-Net during training — grab as a byproduct of testing the trainer.
+**Done (2026-08-18):** before/after augmentation example figures --
+`analysis/save_augmentation_examples.py`, run against a real preprocessed
+case (`ATLAS_r001s001_ses1`, large lesion) with the exact rotation/patch/
+mirror config nnU-Net computed for tonight's actual `baseline-wideaug-500`
+run. Three PNGs under `workspace/figures/augmentation_examples/`:
+- `augmentation_comparison_*` — honest, as actually seen during training
+  (each intensity transform only fires ~15-30% of the time, so a single draw
+  often shows little difference — expected, not a bug).
+- `augmentation_forced_intensity_*` — illustrative only, probability forced
+  to 1 so the stock-vs-widened range difference is actually visible; not
+  what training runs.
+- `augmentation_context_*` — whole preprocessed volume with the 128^3
+  training-patch region boxed, since any single patch is smaller than the
+  full head and (for a large, off-center lesion) won't show the whole brain
+  by itself.
+This was genuinely time-sensitive: the augmentation *config* itself isn't
+saved anywhere by nnU-Net during training, unlike the per-epoch curves above.
+Now captured in both the trainer's code and this reusable script — no more
+urgency, can be regenerated for other cases anytime.
 
 **Explicitly deferred:** prediction ensembling and anything built on it — the
 one thing intentionally left for after tomorrow night's run.
