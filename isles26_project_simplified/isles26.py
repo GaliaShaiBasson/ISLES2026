@@ -86,6 +86,20 @@ TRAINER_GROUPS = {
     "focal-tversky-500": ["nnUNetTrainerFocalTversky_500epochs"],
     "tversky-mild-500": ["nnUNetTrainerTverskyMild_500epochs"],
     "sampling-500": ["nnUNetTrainerLesionAwareSampling_500epochs_full"],
+
+    # Widened-intensity-augmentation variant, built on the plain baseline for a
+    # clean A/B against baseline-500 (see custom_trainers/nnUNetTrainerWideAug.py
+    # and CLAUDE.md/PROJECT_PLAN.md/PROJECT_REVIEW.md "two runs remain" entries).
+    "baseline-wideaug-500": ["nnUNetTrainerWideAugBaseline_500epochs"],
+
+    # Overfit-a-tiny-subset sanity gate (training-tips checklist item 1 / this
+    # project's own bug history -- see PROJECT_REVIEW.md). Run against a new
+    # trainer on Dataset999_ATLASsample (small sample dataset) BEFORE launching
+    # it for real -- see sanity_overfit_check.sh. Not a real experiment result.
+    "overfit-check-wideaug": ["nnUNetTrainerWideAugBaseline_OverfitCheck"],
+    # Stock-augmentation control for the same check -- see
+    # custom_trainers/nnUNetTrainerOverfitCheck.py:nnUNetTrainerBaseline_OverfitCheck.
+    "overfit-check-baseline": ["nnUNetTrainerBaseline_OverfitCheck"],
 }
 
 
@@ -319,13 +333,33 @@ def cmd_prepare(args: argparse.Namespace) -> int:
     if not raw_root:
         raise SystemExit("Set ISLES26_RAW_ROOT in .env or pass --raw-root.")
 
+    dataset_id = args.dataset_id or config_value(env, "ISLES26_DATASET_ID", int)
+
+    # --dataset-id 999 is reserved for sample/smoke-test runs (see CLAUDE.md
+    # "Sample/smoke-test pipeline runs must never touch real-run artifacts").
+    # Without --out-metadata-csv this silently fell back to
+    # env["ISLES26_CASE_METADATA_CSV"] -- the SAME shared path a real dataset
+    # (e.g. dataset001) uses -- clobbering real sampling-weight metadata with a
+    # tiny sample-run subset. Happened for real on 2026-08-18 via
+    # sanity_overfit_check.sh's `prepare --dataset-id 999` call; restored from
+    # workspace/splits/manifest.csv afterward. Hard-refuse instead of silently
+    # defaulting, so this fails loudly at the point of the mistake instead of
+    # being discovered later as corrupted shared data.
+    if dataset_id == 999 and not args.out_metadata_csv:
+        raise SystemExit(
+            "--dataset-id 999 (the reserved sample/smoke-test dataset) requires an explicit "
+            "--out-metadata-csv -- it must never fall back to the shared ISLES26_CASE_METADATA_CSV "
+            f"default ({env['ISLES26_CASE_METADATA_CSV']!r}), which is real-run data for another "
+            "dataset id. Pass e.g. --out-metadata-csv workspace/sample_run/case_metadata.csv"
+        )
+
     command = [
         sys.executable,
         str(PROJECT_ROOT / "data_prep" / "prepare_isles26_dataset.py"),
         "--raw-root",
         raw_root,
         "--dataset-id",
-        str(args.dataset_id or config_value(env, "ISLES26_DATASET_ID", int)),
+        str(dataset_id),
         "--dataset-name",
         args.dataset_name or config_value(env, "ISLES26_DATASET_NAME"),
         "--out-metadata-csv",
@@ -961,6 +995,8 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
         str(results_dir / "summary_by_size_bin.csv"),
         "--out-summary-by-split",
         str(results_dir / "summary_by_split.csv"),
+        "--out-summary-by-split-siteweighted",
+        str(results_dir / "summary_by_split_siteweighted.csv"),
     ]
     run_command(command, env, args.print_only)
     if not args.print_only:
