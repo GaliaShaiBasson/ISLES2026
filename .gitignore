@@ -7,6 +7,7 @@ nnUNet_results/
 *.tar.gz
 ATLAS*/
 data/project_debug_data
+archived_datasets
 
 # Hidden final-holdout test set (id + ood) -- this project's stand-in for the
 # real, never-received ISLES'26 challenge test set. Must never be committed or
