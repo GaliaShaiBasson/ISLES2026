@@ -10,6 +10,20 @@ settled.
 This file is the *why* behind deviations from defaults, plus how we work
 together. Cross-reference rather than duplicate.
 
+## Checking on a running unattended experiment
+
+When asked for run status, use `./check_status.sh` (in this directory) rather
+than manually grepping the log. It auto-picks the newest `workspace/full_run*.log`
+and reports: which condition is done/in-progress/pending, current epoch +
+latest train/val loss + pseudo dice + best EMA dice for the in-progress
+condition, an ETA to finish training, whether the driver script and
+`nnUNetv2_train` process are actually alive, and any errors near the log tail.
+
+```
+./check_status.sh                 # most recent full_run*.log
+./check_status.sh <path-to-log>    # a specific run's log
+```
+
 ## Working agreement
 
 1. **Ask before assuming architectural placement.** Where a new script/module
