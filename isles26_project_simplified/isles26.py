@@ -92,6 +92,12 @@ TRAINER_GROUPS = {
     # and CLAUDE.md/PROJECT_PLAN.md/PROJECT_REVIEW.md "two runs remain" entries).
     "baseline-wideaug-500": ["nnUNetTrainerWideAugBaseline_500epochs"],
 
+    # Power-law (p=0.5) bin-level sampling at 500ep/dataset002 -- re-tested on the
+    # test_ood angle specifically, not the val-Dice angle that argued against it at
+    # 250ep/dataset001 (see nnUNetTrainerLesionAwareSamplingPow_500epochs_full's
+    # docstring and PROJECT_PLAN.md). Queued to launch after baseline-wideaug-500.
+    "sampling-pow-500": ["nnUNetTrainerLesionAwareSamplingPow_500epochs_full"],
+
     # Overfit-a-tiny-subset sanity gate (training-tips checklist item 1 / this
     # project's own bug history -- see PROJECT_REVIEW.md). Run against a new
     # trainer on Dataset999_ATLASsample (small sample dataset) BEFORE launching
@@ -100,6 +106,10 @@ TRAINER_GROUPS = {
     # Stock-augmentation control for the same check -- see
     # custom_trainers/nnUNetTrainerOverfitCheck.py:nnUNetTrainerBaseline_OverfitCheck.
     "overfit-check-baseline": ["nnUNetTrainerBaseline_OverfitCheck"],
+    # Gate for sampling-pow-500 -- needs ISLES26_SAMPLING_POW_METADATA_CSV_FULL
+    # overridden to a Dataset999-specific pow CSV, see
+    # nnUNetTrainerOverfitCheck.py:nnUNetTrainerLesionAwareSamplingPow_OverfitCheck.
+    "overfit-check-samplingpow": ["nnUNetTrainerLesionAwareSamplingPow_OverfitCheck"],
 }
 
 
@@ -455,6 +465,10 @@ SAMPLING_METADATA_BY_TRAINER = {
     "nnUNetTrainerLesionAwareSampling_500epochs_full": (
         "ISLES26_CASE_METADATA_CSV_FULL",
         "workspace/case_metadata_full.csv",
+    ),
+    "nnUNetTrainerLesionAwareSamplingPow_500epochs_full": (
+        "ISLES26_SAMPLING_POW_METADATA_CSV_FULL",
+        "workspace/case_metadata_pow_p05_full.csv",
     ),
 }
 
