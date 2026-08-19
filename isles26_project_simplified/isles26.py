@@ -104,6 +104,12 @@ TRAINER_GROUPS = {
     # See nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full's docstring.
     "sampling-pow-curriculum-500": ["nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full"],
 
+    # 1000-epoch baseline, dataset002 -- the follow-up the 500-epoch baseline's
+    # own docstring deferred to, if 500 still showed Dice climbing (see
+    # nnUNetTrainer1000epochs.py). Baseline only, not a full re-run of every
+    # condition at the new budget.
+    "baseline-1000": ["nnUNetTrainerBaseline_1000epochs"],
+
     # Pure TopK(k=10) loss at 500ep/dataset002 -- modeled on MAPPING's (Huo et al.
     # 2022, arXiv:2211.15486, 1st place ATLAS'22 challenge) "DTK10" scheme, which
     # replaces the default Dice+CE compound loss with TopK10 specifically to improve
