@@ -8,9 +8,11 @@ from pathlib import Path
 import pandas as pd
 
 REQUIRED_COLUMNS = {"case_id", "experiment", "dice", "hd95_mm"}
-# lesion_f1 is optional, not required: older result CSVs predate lesion-wise scoring and
-# would otherwise fail the column check on re-aggregation.
-OPTIONAL_METRIC_COLUMNS = ["lesion_f1"]
+# lesion_f1/avd_mm3/lesion_count_diff are optional, not required: older result CSVs
+# predate these metrics and would otherwise fail the column check on re-aggregation.
+# avd_mm3 and lesion_count_diff are two of the four official ISLES challenge metrics
+# (alongside dice and lesion_f1) -- see ISLES2026_challenge.md.
+OPTIONAL_METRIC_COLUMNS = ["lesion_f1", "avd_mm3", "lesion_count_diff"]
 
 
 def site_weighted_summary(combined: pd.DataFrame, metric_cols: list[str]) -> pd.DataFrame:

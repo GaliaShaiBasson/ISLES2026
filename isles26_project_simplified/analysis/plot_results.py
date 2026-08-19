@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -131,6 +132,28 @@ def save_by_center(df: pd.DataFrame, out_dir: Path) -> None:
     plt.close(figure)
 
 
+def _rolling_dice_trend(
+    volumes: pd.Series, dice: pd.Series, frac: float = 0.35, min_points: int = 8
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Smoothed Dice-vs-log(volume) trend line: rolling median over cases sorted by
+    volume. A dependency-free stand-in for LOWESS (no statsmodels in requirements.txt)
+    -- median rather than mean so a handful of outlier lesions can't yank the line
+    around. Returns None if there are too few cases to smooth meaningfully.
+    """
+    order = np.argsort(volumes.to_numpy())
+    sorted_volumes = volumes.to_numpy()[order]
+    sorted_dice = dice.to_numpy()[order]
+    n = len(sorted_volumes)
+    if n < min_points:
+        return None
+    window = max(min_points, int(round(n * frac)))
+    window = min(window, n if n % 2 == 1 else n - 1)  # odd, and no larger than the data
+    if window < 3:
+        return None
+    trend = pd.Series(sorted_dice).rolling(window, center=True, min_periods=max(3, window // 3)).median()
+    return sorted_volumes, trend.to_numpy()
+
+
 def save_volume_scatter(df: pd.DataFrame, out_dir: Path) -> None:
     if "lesion_volume_mm3" not in df.columns:
         print("[skip] lesion_volume_mm3 column is absent")
@@ -138,14 +161,22 @@ def save_volume_scatter(df: pd.DataFrame, out_dir: Path) -> None:
     plot_data = df.copy()
     plot_data["lesion_volume_mm3"] = pd.to_numeric(plot_data["lesion_volume_mm3"], errors="coerce")
     plot_data = plot_data[plot_data["lesion_volume_mm3"] > 0]
+    # Restrict to the 500-epoch trainers (project naming convention: "..._500epochs")
+    # so this comparison stays controlled -- mixing in a 250-epoch run (e.g.
+    # LesionAwareSamplingPow_250epochs) would confound size-vs-Dice with
+    # epoch-budget-vs-Dice, not a like-for-like comparison.
+    plot_data = plot_data[plot_data["experiment"].astype(str).str.contains("_500epochs")]
     if plot_data.empty:
-        print("[skip] no positive lesion volumes are available for log-scale plotting")
+        print("[skip] no 500-epoch experiments with positive lesion volumes are available")
         return
     figure, axis = plt.subplots(figsize=(8, 6))
     for experiment, group in plot_data.groupby("experiment", observed=True):
-        axis.scatter(group["lesion_volume_mm3"], group["dice"], alpha=0.65, label=experiment)
+        points = axis.scatter(group["lesion_volume_mm3"], group["dice"], alpha=0.35, label=experiment)
+        trend = _rolling_dice_trend(group["lesion_volume_mm3"], group["dice"])
+        if trend is not None:
+            axis.plot(*trend, color=points.get_facecolor()[0], linewidth=2)
     axis.set_xscale("log")
-    axis.set_title("Dice versus lesion volume")
+    axis.set_title("Dice versus lesion volume (points + rolling-median trend)")
     axis.set_xlabel("Lesion volume (mm³, log scale)")
     axis.set_ylabel("Dice")
     axis.legend()

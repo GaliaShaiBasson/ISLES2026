@@ -125,12 +125,24 @@ def evaluate_case(pred_path: Path, gt_path: Path, lesion_connectivity: int = 3,
     pred = sitk.GetArrayFromImage(pred_image) > 0
     gt = sitk.GetArrayFromImage(gt_image) > 0
     spacing = gt_image.GetSpacing()[::-1]  # sitk spacing is (x,y,z); GetArrayFromImage returns (z,y,x)
+    voxel_vol_mm3 = float(np.prod(gt_image.GetSpacing()))
+    pred_vol_mm3 = float(pred.sum()) * voxel_vol_mm3
+    gt_vol_mm3 = float(gt.sum()) * voxel_vol_mm3
+    lesion_wise = lesion_wise_f1(pred, gt, connectivity=lesion_connectivity, min_lesion_voxels=min_lesion_voxels)
     return {
         "dice": dice_score(pred, gt),
         "hd95_mm": hausdorff_distance_95(pred, gt, spacing),
         "gt_empty": bool(not gt.any()),
         "pred_empty": bool(not pred.any()),
-        **lesion_wise_f1(pred, gt, connectivity=lesion_connectivity, min_lesion_voxels=min_lesion_voxels),
+        # AVD and lesion-count difference are two of the four official ISLES challenge
+        # metrics (alongside dice and lesion-wise F1, both already computed) -- see
+        # ISLES2026_challenge.md. Both are per-case here; "average" (AVD/ALD) happens at
+        # aggregation, same as dice/hd95_mm/lesion_f1.
+        "pred_vol_mm3": pred_vol_mm3,
+        "gt_vol_mm3": gt_vol_mm3,
+        "avd_mm3": abs(pred_vol_mm3 - gt_vol_mm3),
+        "lesion_count_diff": abs(lesion_wise["n_pred_lesions"] - lesion_wise["n_gt_lesions"]),
+        **lesion_wise,
     }
 
 
@@ -192,7 +204,7 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     output.to_csv(out_path, index=False)
     print(f"Wrote {len(output)} rows to {out_path} (skipped={skipped}, failed={failed})")
-    print(output[["dice", "hd95_mm", "lesion_f1"]].describe().to_string())
+    print(output[["dice", "hd95_mm", "lesion_f1", "avd_mm3", "lesion_count_diff"]].describe().to_string())
     return 0
 
 
