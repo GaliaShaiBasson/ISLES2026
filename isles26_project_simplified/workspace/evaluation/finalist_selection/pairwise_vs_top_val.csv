@@ -1,0 +1,7 @@
+trainer,metric,mean_diff_vs_top,ci_low_0.05,ci_high_0.05,significant,trainer_better_than_top,n_paired_cases
+nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full,hd95_mm,4.029241675703498,1.7215380110399692,6.791815631601858,True,False,117
+nnUNetTrainerLesionAwareSamplingPow_500epochs_full,hd95_mm,3.8039837313466065,1.906917246450972,6.082751111397693,True,False,117
+nnUNetTrainerLesionAwareSampling_500epochs_full,hd95_mm,3.498016198852135,1.3544849333316078,5.965826304540634,True,False,117
+nnUNetTrainerBaseline_500epochs,hd95_mm,1.630479078960279,-0.2797205062752437,3.8053510015796728,False,False,117
+nnUNetTrainerTverskyMild_500epochs,hd95_mm,1.4679359941129448,-0.2676343961292826,3.366090800817403,False,False,117
+nnUNetTrainerFocalTversky_500epochs,hd95_mm,0.5010478759402563,-1.5609238972999202,2.676967890751668,False,False,117
