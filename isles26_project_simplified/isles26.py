@@ -98,6 +98,23 @@ TRAINER_GROUPS = {
     # docstring and PROJECT_PLAN.md). Queued to launch after baseline-wideaug-500.
     "sampling-pow-500": ["nnUNetTrainerLesionAwareSamplingPow_500epochs_full"],
 
+    # Power-law sampling with p annealed 0 -> 1 across training (deferred
+    # re-weighting), rather than a single fixed p -- additional condition
+    # alongside sampling-500/sampling-pow-500, not a replacement for either.
+    # See nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full's docstring.
+    "sampling-pow-curriculum-500": ["nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full"],
+
+    # Pure TopK(k=10) loss at 500ep/dataset002 -- modeled on MAPPING's (Huo et al.
+    # 2022, arXiv:2211.15486, 1st place ATLAS'22 challenge) "DTK10" scheme, which
+    # replaces the default Dice+CE compound loss with TopK10 specifically to improve
+    # small-lesion segmentation -- this project's own universal weak point (see
+    # nnUNetTrainerTopk10_500epochs's docstring).
+    # nnUNetTrainerTopk10_500epochs (pure TopK, above) collapsed to an empty-mask
+    # prediction on a real launch (2026-08-19, see its docstring) -- not relaunched.
+    "topk10-500": ["nnUNetTrainerTopk10_500epochs"],
+    # Hedged replacement: Dice + TopK10 compound, keeps Dice's anti-collapse anchor.
+    "dctopk10-500": ["nnUNetTrainerDCTopk10_500epochs"],
+
     # Overfit-a-tiny-subset sanity gate (training-tips checklist item 1 / this
     # project's own bug history -- see PROJECT_REVIEW.md). Run against a new
     # trainer on Dataset999_ATLASsample (small sample dataset) BEFORE launching
@@ -110,6 +127,11 @@ TRAINER_GROUPS = {
     # overridden to a Dataset999-specific pow CSV, see
     # nnUNetTrainerOverfitCheck.py:nnUNetTrainerLesionAwareSamplingPow_OverfitCheck.
     "overfit-check-samplingpow": ["nnUNetTrainerLesionAwareSamplingPow_OverfitCheck"],
+    # Gate for topk10-500 -- see nnUNetTrainerOverfitCheck.py:nnUNetTrainerTopk10_OverfitCheck.
+    "overfit-check-topk10": ["nnUNetTrainerTopk10_OverfitCheck"],
+    # Gate for dctopk10-500 -- non-negotiable given topk10-500's collapse, see
+    # nnUNetTrainerOverfitCheck.py:nnUNetTrainerDCTopk10_OverfitCheck.
+    "overfit-check-dctopk10": ["nnUNetTrainerDCTopk10_OverfitCheck"],
 }
 
 
@@ -470,6 +492,15 @@ SAMPLING_METADATA_BY_TRAINER = {
         "ISLES26_SAMPLING_POW_METADATA_CSV_FULL",
         "workspace/case_metadata_pow_p05_full.csv",
     ),
+    # Curriculum trainer computes weights dynamically from size_bin/lesion_volume_mm3
+    # at a p that changes over training (see its docstring) -- it does NOT read this
+    # CSV's sampling_weight column. This hash therefore only tracks identity of the
+    # underlying per-case volume/bin data, not the full p-schedule (which is fixed in
+    # the class definition itself, so a schedule change requires a new class/name).
+    "nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full": (
+        "ISLES26_SAMPLING_POW_CURRICULUM_METADATA_CSV_FULL",
+        "workspace/case_metadata_full.csv",
+    ),
 }
 
 
@@ -567,7 +598,13 @@ def _introspect_trainer(trainer: str, env: dict[str, str]) -> dict:
 
 
 def compute_run_fingerprint(
-    trainer: str, dataset_id: int, dataset_name: str, configuration: str, fold: str, env: dict[str, str]
+    trainer: str,
+    dataset_id: int,
+    dataset_name: str,
+    configuration: str,
+    fold: str,
+    env: dict[str, str],
+    plans_identifier: str = "nnUNetPlans",
 ) -> dict:
     """Everything that actually determines this run's results, beyond what nnU-Net's own
     output-folder naming (trainer/plans/config/fold) captures on its own.
@@ -577,9 +614,18 @@ def compute_run_fingerprint(
     (see _guard_run_fingerprint) and to namespace our own results/evaluation output
     (see run_id_from_fingerprint) -- so "does this collide" is answered the same way in
     both places instead of two hand-maintained schemes drifting apart.
+
+    plans_identifier is deliberately omitted from the returned dict when it's the
+    historical default ("nnUNetPlans") -- every fingerprint computed before --plans
+    existed (including markers already written on disk by in-flight runs) has no
+    "plans" key, so keeping the default silent here means this stays byte-identical
+    to the pre-existing hash/run_id for every run that never asked for a non-default
+    plans identifier. Only a non-default plans (e.g. nnUNetResEncUNetMPlans) adds the
+    key -- which is exactly what's needed to keep it from colliding with a
+    same-trainer default-plans run.
     """
     introspected = _introspect_trainer(trainer, env)
-    return {
+    fingerprint = {
         "trainer": trainer,
         "dataset": f"Dataset{dataset_id:03d}_{dataset_name}",
         "configuration": configuration,
@@ -589,19 +635,26 @@ def compute_run_fingerprint(
         "save_every": introspected["save_every"],
         "sampling_weight_hash": _sampling_weight_hash(trainer, env),
     }
+    if plans_identifier != "nnUNetPlans":
+        fingerprint["plans"] = plans_identifier
+    return fingerprint
 
 
 def run_id_from_fingerprint(fingerprint: dict) -> str:
     """Short, human-browsable, collision-safe id for a run: readable prefix + content hash.
 
     The hash (not the prefix) is what actually guarantees safety -- two runs only ever
-    share a run_id if every field in compute_run_fingerprint() is identical.
+    share a run_id if every field in compute_run_fingerprint() is identical. The prefix
+    only gains a plans segment when the fingerprint has a non-default "plans" key (see
+    compute_run_fingerprint) -- default-plans run_ids are unchanged from before --plans
+    existed.
     """
     import hashlib
 
     digest = hashlib.sha1(json.dumps(fingerprint, sort_keys=True).encode("utf-8")).hexdigest()[:10]
     fold = fingerprint["fold"]
-    return f"{fingerprint['trainer']}__{fingerprint['configuration']}__fold{fold}__fp{digest}"
+    plans_part = f"__{fingerprint['plans']}" if "plans" in fingerprint else ""
+    return f"{fingerprint['trainer']}{plans_part}__{fingerprint['configuration']}__fold{fold}__fp{digest}"
 
 
 def _fingerprint_diff(old: dict, new: dict) -> list[str]:
@@ -676,9 +729,18 @@ def _copy_splits_final_json(env: dict[str, str], dataset_id: int, dataset_name: 
 
 
 def _find_latest_checkpoint(
-    trainer: str, dataset_id: int, dataset_name: str, configuration: str, fold: str, env: dict[str, str]
+    trainer: str,
+    dataset_id: int,
+    dataset_name: str,
+    configuration: str,
+    fold: str,
+    env: dict[str, str],
+    plans_identifier: str = "nnUNetPlans",
 ) -> Path | None:
-    checkpoint = _output_folder(trainer, dataset_id, dataset_name, configuration, fold, env) / "checkpoint_latest.pth"
+    checkpoint = (
+        _output_folder(trainer, dataset_id, dataset_name, configuration, fold, env, plans_identifier)
+        / "checkpoint_latest.pth"
+    )
     return checkpoint if checkpoint.is_file() else None
 
 
@@ -692,10 +754,11 @@ def _train_one(
     num_gpus: int,
     args: argparse.Namespace,
     env: dict[str, str],
+    plans_identifier: str = "nnUNetPlans",
 ) -> None:
     continue_training = args.continue_training
     if not continue_training and not args.overwrite and not args.validate_only:
-        latest = _find_latest_checkpoint(trainer, dataset_id, dataset_name, configuration, fold, env)
+        latest = _find_latest_checkpoint(trainer, dataset_id, dataset_name, configuration, fold, env, plans_identifier)
         if latest is not None:
             # Training was interrupted mid-run (crash, kill, machine restart) and left a
             # partial checkpoint_latest.pth. nnU-Net's own default (no --c) would silently
@@ -708,6 +771,8 @@ def _train_one(
     command = ["nnUNetv2_train", str(dataset_id), configuration, fold]
     if trainer != "nnUNetTrainer":
         command += ["-tr", trainer]
+    if plans_identifier != "nnUNetPlans":
+        command += ["-p", plans_identifier]
     if num_gpus != 1:
         command += ["-num_gpus", str(num_gpus)]
     if device != "cuda":
@@ -726,20 +791,35 @@ def _train_one(
 
 
 def _output_folder(
-    trainer: str, dataset_id: int, dataset_name: str, configuration: str, fold: str, env: dict[str, str]
+    trainer: str,
+    dataset_id: int,
+    dataset_name: str,
+    configuration: str,
+    fold: str,
+    env: dict[str, str],
+    plans_identifier: str = "nnUNetPlans",
 ) -> Path:
     return (
         Path(env["nnUNet_results"])
         / f"Dataset{dataset_id:03d}_{dataset_name}"
-        / f"{trainer}__nnUNetPlans__{configuration}"
+        / f"{trainer}__{plans_identifier}__{configuration}"
         / f"fold_{fold}"
     )
 
 
 def _find_existing_checkpoint(
-    trainer: str, dataset_id: int, dataset_name: str, configuration: str, fold: str, env: dict[str, str]
+    trainer: str,
+    dataset_id: int,
+    dataset_name: str,
+    configuration: str,
+    fold: str,
+    env: dict[str, str],
+    plans_identifier: str = "nnUNetPlans",
 ) -> Path | None:
-    checkpoint = _output_folder(trainer, dataset_id, dataset_name, configuration, fold, env) / "checkpoint_final.pth"
+    checkpoint = (
+        _output_folder(trainer, dataset_id, dataset_name, configuration, fold, env, plans_identifier)
+        / "checkpoint_final.pth"
+    )
     return checkpoint if checkpoint.is_file() else None
 
 
@@ -757,6 +837,7 @@ def cmd_train(args: argparse.Namespace) -> int:
         configuration = args.configuration or config_value(env, "ISLES26_CONFIGURATION")
         device = args.device or config_value(env, "ISLES26_DEVICE")
     num_gpus = args.num_gpus or config_value(env, "ISLES26_NUM_GPUS", int)
+    plans_identifier = args.plans or "nnUNetPlans"
 
     if args.preprocess:
         preprocess_args = argparse.Namespace(
@@ -789,19 +870,23 @@ def cmd_train(args: argparse.Namespace) -> int:
     )
 
     for trainer in trainers:
-        print(f"\n== {trainer} ==")
-        output_folder = _output_folder(trainer, dataset_id, dataset_name, configuration, fold, env)
+        print(f"\n== {trainer} ==" + (f" (plans={plans_identifier})" if plans_identifier != "nnUNetPlans" else ""))
+        output_folder = _output_folder(trainer, dataset_id, dataset_name, configuration, fold, env, plans_identifier)
         if not args.print_only:
             # Runs before the checkpoint skip-guard below: a hyperparameter change that
             # nnU-Net's own folder naming can't see (num_epochs, sampling weights
             # content, split fold count, ...) must be caught even when no
             # checkpoint_final.pth exists yet (e.g. a stale partial run from a since-
             # changed config). See compute_run_fingerprint/_guard_run_fingerprint.
-            fingerprint = compute_run_fingerprint(trainer, dataset_id, dataset_name, configuration, fold, env)
+            fingerprint = compute_run_fingerprint(
+                trainer, dataset_id, dataset_name, configuration, fold, env, plans_identifier
+            )
             _guard_run_fingerprint(output_folder, fingerprint, args.overwrite)
             print(f"[run_id] {run_id_from_fingerprint(fingerprint)}")
         if skip_guard_active:
-            existing = _find_existing_checkpoint(trainer, dataset_id, dataset_name, configuration, fold, env)
+            existing = _find_existing_checkpoint(
+                trainer, dataset_id, dataset_name, configuration, fold, env, plans_identifier
+            )
             if existing is not None:
                 message = (
                     f"Training already completed: {existing}. Pass --overwrite to restart from "
@@ -811,7 +896,7 @@ def cmd_train(args: argparse.Namespace) -> int:
                     print(f"[skip] {message}")
                     continue
                 raise SystemExit(message)
-        _train_one(trainer, dataset_id, dataset_name, configuration, fold, device, num_gpus, args, env)
+        _train_one(trainer, dataset_id, dataset_name, configuration, fold, device, num_gpus, args, env, plans_identifier)
     return 0
 
 
@@ -858,13 +943,16 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         dataset_name = args.dataset_name or config_value(env, "ISLES26_DATASET_NAME")
         configuration = args.configuration or config_value(env, "ISLES26_CONFIGURATION")
         fold = str(args.fold if args.fold is not None else config_value(env, "ISLES26_FOLD"))
-        fingerprint = compute_run_fingerprint(args.trainer, dataset_id, dataset_name, configuration, fold, env)
+        plans_identifier = args.plans or "nnUNetPlans"
+        fingerprint = compute_run_fingerprint(
+            args.trainer, dataset_id, dataset_name, configuration, fold, env, plans_identifier
+        )
         rid = run_id_from_fingerprint(fingerprint)
         run_dir = Path(env["ISLES26_RESULTS_DIR"]) / "runs" / rid
         split = args.split or "results"
         experiment_name = args.experiment or args.trainer
         out_csv = Path(args.out_csv).expanduser().resolve() if args.out_csv else run_dir / f"results_{split}.csv"
-        checkpoint_dir = _output_folder(args.trainer, dataset_id, dataset_name, configuration, fold, env)
+        checkpoint_dir = _output_folder(args.trainer, dataset_id, dataset_name, configuration, fold, env, plans_identifier)
     else:
         # Legacy/manual path (no --trainer): unchanged flat workspace/evaluation/ layout,
         # for one-off ad-hoc evaluate calls that aren't part of the tracked experiment grid.
@@ -1102,6 +1190,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--configuration")
     p.add_argument("--device", choices=["cuda", "cpu", "mps"])
     p.add_argument("--num-gpus", type=int)
+    p.add_argument(
+        "--plans",
+        default=None,
+        help=(
+            "nnU-Net plans identifier, e.g. nnUNetResEncUNetMPlans (must already exist under "
+            "nnUNet_preprocessed/<dataset>/, via nnUNetv2_plan_experiment -pl ...). Default: "
+            "nnUNetPlans (the plain-U-Net default planner). A non-default value gets its own "
+            "output folder and run_id -- see compute_run_fingerprint -- so it never collides "
+            "with a same-trainer default-plans run."
+        ),
+    )
     p.add_argument("--preprocess", action="store_true", help="Run preprocessing before training")
     p.add_argument("--continue", dest="continue_training", action="store_true")
     p.add_argument("--validate-only", action="store_true")
@@ -1134,6 +1233,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dataset-name", help="Used with --trainer; default: ISLES26_DATASET_NAME")
     p.add_argument("--configuration", help="Used with --trainer; default: ISLES26_CONFIGURATION")
     p.add_argument("--fold", help="Used with --trainer; default: ISLES26_FOLD")
+    p.add_argument(
+        "--plans",
+        default=None,
+        help="Used with --trainer; must match the --plans the checkpoint was trained with. Default: nnUNetPlans",
+    )
     p.add_argument(
         "--experiment",
         default=None,
