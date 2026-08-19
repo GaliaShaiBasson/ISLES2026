@@ -59,6 +59,40 @@ trainer against the new internals before trusting results from it.
 
 Newest first. Each entry: decision, rationale, where it's implemented.
 
+### DC+TopK10 dropped: same empty-prediction collapse as pure TopK10, on the overfit-check gate this time (2026-08-19 night / 2026-08-20)
+
+- **Context:** `nnUNetTrainerDCTopk10` (`custom_trainers/nnUNetTrainerLossVariants.py`) was
+  written as a hedge after `nnUNetTrainerTopk10_500epochs` (nnU-Net's stock pure-TopK loss,
+  no Dice/CE) collapsed to an all-empty prediction on the real 500-epoch run -- the idea
+  being that Dice's overlap term (empty prediction -> Dice=0, a strong penalty) would anchor
+  against the same collapse while keeping TopK's hard-voxel focus.
+- **Result:** `queue_dctopk10.sh`'s overfit-sanity-gate (100 epochs / 25 iters on the 6-case
+  `Dataset999_ATLASsample`, the same gate that would have caught the 2026-08-17 sampling
+  collapse in minutes instead of 96 epochs) caught this one *before* any real GPU time was
+  spent: Pseudo Dice stayed at exactly 0.0 for all 100 epochs, never moving once, while
+  train_loss did keep decreasing (0.93 -> ~0.30, noisy) -- the network is training, it just
+  never produces any foreground overlap. Full log:
+  `workspace/archive/logs/queue_dctopk10_20260819_175343.log`. The real 500-epoch run was
+  correctly never launched.
+- **Ruled out a wiring bug before dropping it:** `DC_and_topk_loss`'s construction
+  (`batch_dice`/`smooth`/`do_bg=False`/`ddp` kwargs, `ignore_label` passthrough, `k=10`)
+  matches nnU-Net's own stock `_build_loss` pattern exactly -- nothing project-specific to
+  miswire, unlike the 2026-08-17 bug (patched-the-wrong-object) or the 2026-08-17 sampling
+  bug (data-dependent weight collapse). Confirmed live: ran `DC_and_topk_loss` standalone on
+  a synthetic imbalanced batch (small foreground cube in a mostly-background volume) --
+  produced a finite loss and a finite, nonzero gradient. So this is a real optimization-
+  dynamics failure on this dataset's extreme foreground imbalance (lesions often <1% of
+  volume), not a bug to fix -- TopK's hardest-10%-of-voxels selection is apparently still
+  background-dominated enough, even with Dice's penalty present, to let this dataset's
+  optimizer settle on empty predictions. Same qualitative failure as pure TopK10, just one
+  gate-catch cheaper.
+- **Decision: dropped, not retried.** Two independent TopK-family losses collapsing the same
+  way is itself the reportable finding -- log it as a real negative result (TopK-based losses
+  are not robust to this dataset's imbalance, at least not without further intervention) next
+  to the other loss-variant results, rather than spending more GPU/debugging time chasing a
+  fix. 7 solid conditions (baseline, focal-tversky, tversky-mild, sampling, sampling-pow,
+  wideaug, resenc-M architecture in progress) already cover the report's comparison needs.
+
 ### Curriculum (annealed-p) power-law sampling trainer added, not launched (2026-08-19)
 
 - **Idea:** instead of a single fixed p in `sampling_weights_from_size_bin_power`

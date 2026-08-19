@@ -93,6 +93,27 @@ rows.
   before the 500-epoch/`Dataset002` port; the real 500-epoch version now
   exists, so the stale mismatched-epoch-budget run was deleted rather than
   left to confuse the controlled comparison — commits `a7ca690`/`be0294b`).
+- **DC+TopK10 loss variant dropped (2026-08-19 night), a real negative
+  finding, not just an incomplete run.** `nnUNetTrainerDCTopk10` was written
+  as a hedge after nnU-Net's stock pure-TopK10 loss collapsed to an
+  all-empty prediction on the real 500-epoch run — Dice's overlap term was
+  meant to anchor against that. Its overfit-sanity-gate (100 epochs / 6
+  cases) caught the same collapse before any real GPU time was spent:
+  Pseudo Dice stayed at exactly 0.0 for all 100 epochs while train_loss kept
+  moving. Confirmed not a wiring bug (loss construction matches nnU-Net's
+  own stock pattern; a standalone synthetic-batch test produced a sane
+  finite gradient) — a real optimization-dynamics failure on this dataset's
+  extreme foreground imbalance. Decision: dropped, not retried — report
+  both TopK-family collapses as a negative result next to the other
+  loss-variant comparisons. See `CLAUDE.md` "DC+TopK10 dropped" entry for
+  the full evidence trail.
+- **ResEnc-M architecture run in progress**, `nnUNetTrainerBaseline_500epochs`
+  on `nnUNetResEncUNetMPlans` — isolates the architecture-only effect vs.
+  plain `baseline-500` (see `CLAUDE.md` "Switch to nnU-Net's ResEnc planner"
+  future-consideration entry). Launched 2026-08-19 22:02 via
+  `workspace/queue_resencm_baseline500.sh`, which also chains predict →
+  evaluate (val + test) → aggregate → plot once training finishes — no
+  action needed to pick up the results.
 
 **Not yet done, next up:** run `dice_vs_threshold.py` and
 `probability_histogram.py` against the real `predTs_prob/` exports for at
