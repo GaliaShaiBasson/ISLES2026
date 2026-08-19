@@ -13,6 +13,7 @@ data/project_debug_data
 archived_datasets
 isles26_project_simplified/workspace/postprocess_test/diceonly250_predTs_cc10
 isles26_project_simplified/workspace/sample_run/predTs_cc_test
+isles26_project_simplified/workspace/postprocess_grid
 
 # Hidden final-holdout test set (id + ood) -- this project's stand-in for the
 # real, never-received ISLES'26 challenge test set. Must never be committed or
