@@ -59,6 +59,49 @@ trainer against the new internals before trusting results from it.
 
 Newest first. Each entry: decision, rationale, where it's implemented.
 
+### Curriculum (annealed-p) power-law sampling trainer added, not launched (2026-08-19)
+
+- **Idea:** instead of a single fixed p in `sampling_weights_from_size_bin_power`
+  (as `sampling-pow-500` uses, p=0.5 fixed for all 500 epochs), anneal p from 0
+  (uniform/natural distribution) to 1 (full per-bin volume-mass correction) over
+  the course of training. Same idea as "deferred re-weighting" in the long-tailed-
+  recognition literature (e.g. Cao et al. 2019 LDAM-DRW) — let the network learn
+  generic features on the natural distribution first, then push toward the rare
+  small-lesion bin later, rather than reweighting from epoch 0 the way every other
+  sampling trainer in this project does.
+- **Real engineering constraint found while implementing:** nnU-Net's train
+  dataloader runs inside worker processes spawned by `NonDetMultiThreadedAugmenter`
+  (see `nnUNetTrainer.get_dataloaders`) — pickled copies, not shared with the main
+  process. Mutating `sampling_probabilities` on the in-process loader object (the
+  naive approach) would never reach the workers actually drawing batches. Two real
+  options: (a) periodically tear down and rebuild the whole dataloader (fresh
+  worker processes) with newly-computed weights, making p a step function; or
+  (b) force a single-process dataloader (`num_processes=0`) and mutate weights
+  continuously, at the cost of serializing data loading (likely a real slowdown,
+  working against this project's GPU-time discipline). Chose (a): rebuild every 25
+  epochs (20 steps across the 500-epoch budget), close enough to continuous
+  without the (b) slowdown risk.
+- **Implemented:** `nnUNetTrainerLesionAwareSamplingPowCurriculum` (base class,
+  `custom_trainers/nnUNetTrainerLesionAwareSampling.py`) + `..._500epochs_full`
+  (500-epoch mixin, `custom_trainers/nnUNetTrainer500epochs.py`), wired into
+  `isles26.py` as `sampling-pow-curriculum-500`, an **additional** condition —
+  `sampling-500` (4:2:1) and `sampling-pow-500` (fixed p=0.5) are untouched.
+  Reads `workspace/case_metadata_full.csv` directly (size_bin +
+  lesion_volume_mm3, same file `sampling-500` reads) rather than a precomputed
+  `sampling_weight` column, since the weight formula must be re-evaluated at a
+  new p on every rebuild — own dedicated env var
+  (`ISLES26_SAMPLING_POW_CURRICULUM_METADATA_CSV_FULL`) so an override never
+  leaks between trainers. `p` schedule constants (`P_START`/`P_END`/
+  `DATALOADER_REBUILD_EVERY_EPOCHS`) live as class attributes, not config —
+  changing the schedule needs a new trainer class/name, consistent with how
+  every other hyperparameter in this project's trainers works.
+- **Verified but NOT run:** both files compile, `python isles26.py train
+  sampling-pow-curriculum-500 --dataset-id 2 --print-only` resolves the command
+  correctly, and the step-schedule math was checked standalone (p pinned at
+  exactly 0.0 through epoch 24, climbing every 25 epochs, exactly 1.0 from epoch
+  475 through 499). Not launched — no GPU time left for a new 500-epoch
+  condition before the report is due (see PROJECT_PLAN.md "Future work").
+
 ### Foundational hardening pass (baseline, predates the dated entries below)
 
 A review of the original operational layer found it required several

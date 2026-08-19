@@ -21,6 +21,86 @@ rules apply across all of it, not obvious from the commands alone:
 - Never treat the `debug` trainer's output as an experimental result — it's
   a pipeline check only.
 
+## Status as of 2026-08-19 (post two-night plan)
+
+The two-night plan below **completed**: all 7 conditions now have finished
+500-epoch/`Dataset002` checkpoints, predictions, and evaluation —
+`baseline`, `focal-tversky`, `tversky-mild`, `sampling` (4:2:1, full),
+`sampling-pow` (p=0.5, full — the one item explicitly deferred two nights
+ago, now closed), `wideaug`. `workspace/evaluation/runs_index.csv` has all 7
+rows.
+
+**Also landed since the two-night plan, not anticipated in it:**
+- **Connected-component grid search finished and scored on held-out test**
+  for `baseline-500` (`workspace/postprocess_grid/baseline500/`). Real
+  finding, not just a completed task: **the auto-selected winner (lowest val
+  HD95) is `min_voxels=1, connectivity=1` — the raw/no-op control itself.**
+  Across all 20 combos, `dice_mean` moves by ≤0.0004 and `hd95_mean` only
+  ever gets *worse* than the no-op as `min_voxels` grows (19.70mm at
+  `min_voxels=1` → 20.3+mm at `min_voxels=20`); `lesion_f1` improves
+  monotonically with more aggressive filtering, but never enough to move the
+  HD95-based selection rule off the no-op. Contrast with the earlier
+  hand-picked `min_voxels=10` test on `DiceOnly_250epochs`/`Dataset001`
+  (`+0.035` lesion F1 but `+0.35mm` worse HD95) — same qualitative tradeoff,
+  but the *properly selected* combo at 500 epochs concludes "don't
+  post-process" rather than landing on a specific threshold. Frozen held-out
+  test scoring (raw): 249/250 cases evaluable, Dice mean 0.653, HD95 mean
+  17.94mm, lesion F1 mean 0.637 (`test_final/results_raw_test.csv`). Report
+  this as a real negative result, not a gap — it's a legitimate
+  Experiments-section row (see "Report deliverables" below).
+- **Per-case softmax probabilities saved for all 6 non-baseline 500-epoch
+  conditions** (`predict_prob_remaining.sh`, sequential — same
+  GPU-contention reasoning as training) plus baseline separately
+  (`predict_baseline500_prob_*.log`), each into its own `predTs_prob/`
+  alongside the untouched `predTs/`. This is the prerequisite data for
+  prediction ensembling (still deferred, see below) *and* unlocks two new
+  exploratory scripts:
+  - `analysis/dice_vs_threshold.py` — sweeps the foreground-probability
+    threshold (nnU-Net's argmax export is an implicit fixed 0.5) and plots
+    Dice vs. threshold per experiment, marking the current 0.5 operating
+    point against the best-found one. Not yet run against the real 500-epoch
+    probability exports — next exploratory step, cheap (CPU-only, no rerun
+    of inference needed).
+  - `analysis/probability_histogram.py` — per-experiment histogram of
+    predicted foreground probability split by true GT class (lesion vs.
+    background), log-scale y-axis (background voxels vastly outnumber
+    lesion voxels). Same status: script exists and is committed, not yet run
+    against the real data.
+- **Training-curve parser built and run** (`analysis/plot_learning_curves.py`)
+  — closes item 1 of the "needs a script" list below. Parses nnU-Net's
+  `training_log_*.txt` (train/val loss, pseudo-Dice, LR, epoch time) into a
+  CSV plus a 3-panel comparison figure across named runs, with a fixed
+  regex bug avoided (scientific-notation LR values like `7e-05` don't get
+  truncated to `7`); also merges multiple `training_log_*.txt` files per
+  trainer (nnU-Net starts a new one on every resume/validate-only
+  invocation) so a curve covers the full training history, not just the
+  last invocation. Two run modes: explicit `--log 'label=path'` pairs
+  (e.g. a 250-vs-500-epoch baseline comparison), or the default — auto-
+  discover every trainer from `workspace/evaluation/runs_index.csv`
+  (`isles26.py aggregate`'s output), narrowable with `--trainer`. Added a
+  fourth output, `train_val_overlay_<tag>.png` — one small-multiple subplot
+  per trainer with train loss and val loss overlaid on the same axes (the
+  train/val gap reads directly off the two lines' vertical distance,
+  instead of comparing two separate panels). **Run 2026-08-19** against the
+  current 6 500-epoch trainers (auto-discovery mode, `--tag all_trainers`)
+  → `figures/learning_curves_all_trainers.png`,
+  `figures/lr_schedule_all_trainers.png`,
+  `figures/train_val_overlay_all_trainers.png` — no condition shows a
+  meaningful train/val divergence through epoch 500. The 250-vs-500(-vs-1000)
+  baseline comparison is left as a documented `--log` example in the
+  script's docstring, not run (the 1000-epoch condition doesn't exist yet).
+- **`sampling-pow` at 250 epochs / `Dataset001` removed** (was leftover from
+  before the 500-epoch/`Dataset002` port; the real 500-epoch version now
+  exists, so the stale mismatched-epoch-budget run was deleted rather than
+  left to confuse the controlled comparison — commits `a7ca690`/`be0294b`).
+
+**Not yet done, next up:** run `dice_vs_threshold.py` and
+`probability_histogram.py` against the real `predTs_prob/` exports for at
+least `baseline-500` (and ideally every condition, for a Methods-section
+threshold-tuning figure); decide whether the connected-component "no-op
+wins" finding changes plans for prediction ensembling (unlikely, but
+ensembling should be evaluated on its own merits regardless).
+
 ## Training-tips checklist review, and the two-night plan it drove
 
 Cross-checked against the course's "General Training Tips" 6-section
@@ -49,32 +129,37 @@ checklist's ask.
 | No prediction ensembling | Still open — see "not done" below |
 | LR/weight decay/optimizer are untouched defaults | Deferred, see Future work |
 | No overfit-tiny-subset sanity test | **Done** — `nnUNetTrainerOverfitCheck.py` + `sanity_overfit_check.sh` |
-| Augmentation strategy is default, not deliberate | **In progress** — tonight's `wideaug` run |
+| Augmentation strategy is default, not deliberate | **Done** — `wideaug-500` trained/predicted/evaluated, see below |
 | No EMA/SWA weight averaging | Deferred, see Future work — low priority |
 
-**The two-night plan this produced (2026-08-18 tonight, 2026-08-19 final run):**
+**The two-night plan this produced (2026-08-18 night one, 2026-08-19 final
+run) — status: complete.** All items below finished; kept in the past tense
+as a record of what the plan actually covered and how it played out. See
+"Status as of 2026-08-19" above for the outcomes/findings this produced.
 
 Baseline/focal-tversky/tversky-mild/sampling (plain 4:2:1) were already done
 at 500 epochs on `Dataset002_ATLAS` before either of these two nights.
 
-- **Tonight — running now:** `baseline-wideaug-500`
+- **Night one, landed:** `baseline-wideaug-500`
   (`nnUNetTrainerWideAugBaseline_500epochs`), widened brightness/contrast/
   gamma vs. plain `baseline-500` — a clean A/B isolating augmentation's
   effect on the `test_id`/`test_ood` gap, chosen over a domain-adversarial
   approach as the cheaper first lever (see `CLAUDE.md` "Cross-center
-  generalization" entry). Run the overfit-sanity-gate above against any
-  newly-touched trainer before trusting a real launch on it — that's the
-  check that would have caught the 2026-08-17 collapse in minutes instead
-  of 96 epochs.
-- **Tonight, also landed:** site-weighted (macro, mean-of-per-site-means)
+  generalization" entry). Trained/predicted/evaluated; overfit-sanity-gate
+  run against the new trainer before trusting the real launch — the check
+  that would have caught the 2026-08-17 collapse in minutes instead of 96
+  epochs, applied preemptively here.
+- **Night one, also landed:** site-weighted (macro, mean-of-per-site-means)
   split summary in `aggregate_results.py`, guarding the `test_ood` ≥
   `test_id` anomaly against being an artifact of a few high-count sites
   dominating the pooled mean.
-- **Not done, deprioritized in favor of the wideaug A/B:** `sampling-pow`
-  (p=0.5, sqrt-dampened correction) only ever ran at 250 epochs /
-  `Dataset001` — never ported to 500 epochs / `Dataset002` to match the
-  rest of the study.
-- **Tonight, also landed: connected-component post-processing.**
+- **Night two (2026-08-19), landed:** `sampling-pow` (p=0.5, sqrt-dampened
+  correction), originally deprioritized behind the `wideaug` A/B and only
+  run at 250 epochs / `Dataset001` — ported to 500 epochs / `Dataset002`
+  (`nnUNetTrainerLesionAwareSamplingPow_500epochs_full`), trained, predicted,
+  and evaluated; the mismatched-epoch-budget 250-epoch run was removed. See
+  "Status as of 2026-08-19" above.
+- **Night one, also landed: connected-component post-processing.**
   `evaluation/postprocess_predictions.py` — drops predicted connected
   components below `--min-voxels` (26-connected by default, matching
   `lesion_wise_f1`), writes filtered masks to a new directory, never
@@ -87,9 +172,10 @@ at 500 epochs on `Dataset002_ATLAS` before either of these two nights.
   made mean HD95 *worse* (+0.35mm) — some "small" components turned out
   to be genuine diagonally-attached satellite lesion fragments, not
   noise, so a single hand-picked threshold isn't safe without tuning.
-  Queued to search this properly and run fully unattended overnight
-  (2026-08-18→19), behind the GPU pipeline so it never contends for GPU
-  or CPU with real training:
+  Queued to search this properly and ran fully unattended overnight
+  (2026-08-18→19), behind the GPU pipeline so it never contended for GPU
+  or CPU with real training. Completed — see "Status as of 2026-08-19"
+  above for the result (the no-op control won the search):
   - `run_postprocess_grid.sh` — 20 combos (`min_voxels` ∈
     {1,2,3,4,5,6,8,10,15,20} × `connectivity` ∈ {1,3}; `min_voxels=1` is
     the raw/no-op control) filtered + scored **only** against
@@ -107,21 +193,21 @@ at 500 epochs on `Dataset002_ATLAS` before either of these two nights.
     fully exit before starting the grid, per explicit request — keeps the
     whole night's GPU pipeline and this CPU-only grid from ever running
     concurrently, even though the grid itself never touches the GPU.
-  - Results to check on wake-up: `workspace/postprocess_grid/baseline500/
-    grid_summary_val.csv` (all 20 combos), `selected_combo.json` (winner +
-    selection rule), `test_final/results_*_test.csv` (frozen before/after
-    on held-out test). Every combo's output is self-describing (a
-    `*_config.json` with its params next to its filtered masks) and
-    indexed by `grid_manifest.csv`, so any folder is traceable back to its
-    exact `(min_voxels, connectivity)` combination.
-- **Tomorrow night is the real final run** — whatever it produces is what
-  goes in the report, with no engineering time left afterward. Everything
-  in "Report deliverables" below, except ensembling, must be ready
-  *before* it lands.
+  - Results, confirmed present after wake-up:
+    `workspace/postprocess_grid/baseline500/grid_summary_val.csv` (all 20
+    combos), `selected_combo.json` (winner + selection rule),
+    `test_final/results_*_test.csv` (frozen before/after on held-out test).
+    Every combo's output is self-describing (a `*_config.json` with its
+    params next to its filtered masks) and indexed by `grid_manifest.csv`,
+    so any folder is traceable back to its exact `(min_voxels,
+    connectivity)` combination.
+- **The final run has landed (2026-08-19)** — all 7 conditions are trained,
+  predicted, and evaluated at 500 epochs / `Dataset002`; see "Status as of
+  2026-08-19" above for what came out of it and what's still open.
 - **Prediction ensembling** (softmax-averaging across finished checkpoints)
-  is the one thing explicitly deferred until after tomorrow's run — zero
-  GPU cost, no code in `evaluation/` yet, safe to build anytime against
-  already-finished checkpoints.
+  remains deferred — per-case probabilities are now saved for every
+  condition (`predTs_prob/`, see above), so the prerequisite data exists;
+  still no code in `evaluation/` for it yet.
 
 ## Report deliverables — what's ready vs. what needs building
 
@@ -136,25 +222,30 @@ discussion; graphs/tables/figures throughout.
 - Full hyperparameter/config provenance per run — `debug.json` +
   `isles26_fingerprint.json` + `run_manifest.json` (see `CLAUDE.md`
   "Run-identity fingerprinting" entry).
-- Held-out predictions (`predTs/*.nii.gz`) saved to disk for every finished
-  condition.
-- Case-level metrics + overall/by-size/by-split/by-center/volume-scatter
-  figures — already implemented (`evaluation/aggregate_results.py`,
-  `analysis/plot_results.py`).
+- Held-out predictions (`predTs/*.nii.gz`) saved to disk for every finished condition.
+- Case-level metrics + overall/by-size/by-split/by-center/volume-scatter figures — already implemented (`evaluation/aggregate_results.py`, `analysis/plot_results.py`).
 
-**Needs a script that doesn't exist yet (no GPU required, doesn't block training):**
-1. Training-curve parser: `training_log_*.txt` → per-epoch CSV → one
-   comparison figure across conditions.
+**Done (2026-08-19):**
+1. Training-curve parser — `analysis/plot_learning_curves.py`, built and run
+   (`figures/learning_curves_all_trainers.png`,
+   `figures/lr_schedule_all_trainers.png`,
+   `figures/train_val_overlay_all_trainers.png`; see "Status as of
+   2026-08-19").
+4. Sampling-weight distribution figure for `sampling-pow` is now unblocked —
+   `case_metadata_pow_p05_full.csv` (963 cases, `Dataset002` scale) exists;
+   the figure itself still needs to be generated.
+
+**Still needs a script (no GPU required, doesn't block training):**
 2. Split-aware per-center figure: `save_by_center` currently pools
-   train/val/test_id/test_ood per site together; needs faceting by `split`
-   (at minimum `test_id` vs. `test_ood` per center) to show whether the
-   `test_ood` ≥ `test_id` anomaly is site-specific.
-3. Qualitative overlay figures (input / ground truth / prediction / error
-   map — a few representative + failure cases). Predictions are already
-   saved, so safe to build anytime, but don't leave it to report week.
-4. Sampling-weight distribution figure for `sampling-pow` — cheap
-   Methods-section figure once `sampling-pow-500` metadata exists (blocked
-   on the "not done" item above).
+   train/val/test_id/test_ood per site together; needs faceting by `split` (at minimum `test_id` vs. `test_ood` per center) to show whether the `test_ood` ≥ `test_id` anomaly is site-specific.
+3. Qualitative overlay figures (input / ground truth / prediction / error map — a few representative + failure cases). Predictions are already saved, so safe to build anytime, but don't leave it to report week.
+
+**New exploratory scripts, built 2026-08-19, not yet run against real data:**
+`analysis/dice_vs_threshold.py` (Dice vs. foreground-probability threshold,
+checks whether nnU-Net's implicit fixed 0.5 cutoff is actually optimal) and
+`analysis/probability_histogram.py` (predicted-probability distribution by
+true GT class) — both consume the newly-saved `predTs_prob/` softmax exports
+(see "Status as of 2026-08-19"). CPU-only, no rerun of inference needed.
 
 **Done (2026-08-18):** before/after augmentation example figures --
 `analysis/save_augmentation_examples.py`, run against a real preprocessed
@@ -176,14 +267,16 @@ saved anywhere by nnU-Net during training, unlike the per-epoch curves above.
 Now captured in both the trainer's code and this reusable script — no more
 urgency, can be regenerated for other cases anytime.
 
-**In progress (2026-08-18→19, running overnight):** connected-component
-post-processing grid search — see the "Tonight, also landed" entry above
-for the script names, method, and where to find results. Gives the report
-a real Methods-section post-processing step (with its own before/after
-Experiments-section row) beyond what was already scoped here.
+**Done (2026-08-18→19):** connected-component post-processing grid search —
+see the "Tonight, also landed" entry above for the script names and method,
+and "Status as of 2026-08-19" above for the result (auto-selected winner is
+the no-op control; report as a real negative finding). Gives the report a
+real Methods-section post-processing step with its own before/after
+Experiments-section row.
 
-**Explicitly deferred:** prediction ensembling and anything built on it — the
-one thing intentionally left for after tomorrow night's run.
+**Explicitly deferred:** prediction ensembling and anything built on it —
+prerequisite probability exports now exist (`predTs_prob/`, all 7
+conditions) but no ensembling code has been written yet.
 Domain-adversarial training (gradient-reversal on encoder features) — a
 stretch idea for the report's Conclusion/future-work section only, not in
 scope for the final run; see `CLAUDE.md` for why augmentation was tried
@@ -215,10 +308,25 @@ same fold for every method (see the controlled-comparison rules above).
 
 ## Future work (beyond this report)
 
+- **Per-condition threshold tuning** (0.5 → best-found, via
+  `dice_vs_threshold.py`) and probability-calibration inspection (via
+  `probability_histogram.py`) across all 7 conditions, now that
+  `predTs_prob/` exists for each — natural next exploratory pass once the
+  report's fixed deliverables are locked, since it's the same probability
+  data prediction ensembling will need.
+- **Prediction ensembling** (softmax-averaging across the 7 finished
+  checkpoints) — zero GPU cost, prerequisite data (`predTs_prob/`) now
+  exists for every condition; no code in `evaluation/` yet.
 - **Domain-adversarial training** (gradient-reversal domain classifier on
   encoder features) — only worth revisiting if the `test_id`/`test_ood` gap
   is still meaningful after the `wideaug` result. See `CLAUDE.md` for the
   reasoning against doing this first.
+- **Curriculum (annealed-p) power-law sampling** — new trainer
+  `sampling-pow-curriculum-500` (2026-08-19, see `CLAUDE.md`), p ramped 0→1
+  in 20 steps of 25 epochs instead of the fixed p=0.5 `sampling-pow-500`
+  already used. Built and CLI-verified (`--print-only`) but not run —
+  no GPU time left for a follow-up 500-epoch condition before the report is
+  due.
 - **ResEnc planner (M or L)** instead of the default nnU-Net planner — an
   architecture change, not a tuning knob; would need to apply uniformly
   across all conditions to stay controlled. See `CLAUDE.md` "Future
