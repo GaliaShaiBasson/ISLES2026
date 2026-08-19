@@ -26,9 +26,14 @@ from __future__ import annotations
 
 import torch
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
+from nnunetv2.training.nnUNetTrainer.variants.loss.nnUNetTrainerTopkLoss import nnUNetTrainerTopk10Loss
 
-from .nnUNetTrainerLossVariants import nnUNetTrainerFocalTversky, nnUNetTrainerTverskyMild
-from .nnUNetTrainerLesionAwareSampling import nnUNetTrainerLesionAwareSampling, nnUNetTrainerLesionAwareSamplingPow
+from .nnUNetTrainerLossVariants import nnUNetTrainerDCTopk10, nnUNetTrainerFocalTversky, nnUNetTrainerTverskyMild
+from .nnUNetTrainerLesionAwareSampling import (
+    nnUNetTrainerLesionAwareSampling,
+    nnUNetTrainerLesionAwareSamplingPow,
+    nnUNetTrainerLesionAwareSamplingPowCurriculum,
+)
 
 
 class _Epochs500Mixin:
@@ -98,6 +103,69 @@ class nnUNetTrainerLesionAwareSampling_500epochs_full(_Epochs500Mixin, nnUNetTra
 
     CASE_METADATA_CSV_ENV_VAR = "ISLES26_CASE_METADATA_CSV_FULL"
     CASE_METADATA_CSV_DEFAULT = "workspace/case_metadata_full.csv"
+
+
+class nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full(
+    _Epochs500Mixin, nnUNetTrainerLesionAwareSamplingPowCurriculum
+):
+    """Power-law sampling with p annealed 0 -> 1 across training (in 20 steps of 25
+    epochs each -- see nnUNetTrainerLesionAwareSamplingPowCurriculum's docstring for
+    why it's stepped, not continuous), at the 500-epoch budget, dataset002.
+
+    Additional condition alongside the fixed-p variants below, not a replacement for
+    either -- keeps nnUNetTrainerLesionAwareSamplingPow_500epochs_full (fixed p=0.5)
+    and nnUNetTrainerLesionAwareSampling_500epochs_full (fixed 4:2:1) as they are.
+    Tests whether deferring the strong small-lesion correction to later in training
+    (rather than applying it uniformly from epoch 0, as every other sampling variant
+    in this project does) captures more of its benefit without the medium/large-bin
+    cost seen in the fixed-p=0.5/250-epoch result (see CLAUDE.md).
+    """
+
+    pass
+
+
+class nnUNetTrainerTopk10_500epochs(_Epochs500Mixin, nnUNetTrainerTopk10Loss):
+    """Pure TopK(k=10) loss (nnU-Net's own stock nnUNetTrainerTopk10Loss, no Dice/CE)
+    at the 500-epoch budget, dataset002.
+
+    Modeled on the "DTK10" training scheme from MAPPING (Huo et al. 2022,
+    arXiv:2211.15486) -- 1st place, 2022 MICCAI ATLAS Challenge. Their paper
+    describes DTK10 as replacing the default Dice+CE compound loss with TopK10
+    loss specifically because it "further improves the segmentation performance
+    on small lesions in particular" -- concentrating gradient weight on the
+    hardest 10% of voxels. Directly targets this project's own universal
+    weak point (small-lesion Dice, worst on test_ood in every 500-epoch
+    condition run so far -- see CLAUDE.md).
+
+    Uses nnU-Net's own stock TopKLoss implementation unmodified (just adds the
+    project's epoch-budget mixin) rather than reimplementing it -- MAPPING's own
+    "we implement all models based on the nnU-Net framework" wording suggests
+    they used this exact built-in trainer for their DTK10 scheme, not a custom
+    loss class.
+
+    **DO NOT RELAUNCH AS-IS (2026-08-19):** confirmed collapsed to predicting an
+    entirely empty mask (0 nonzero voxels, checked directly on 2 real validation
+    cases from a real launch's checkpoint_latest.pth at epoch ~26/500 --
+    Pseudo Dice pinned at exactly 0.0 the whole time, train_loss plateaued
+    rather than improving). Pure TopK/CE-family losses have no term punishing an
+    empty prediction, unlike Dice -- see nnUNetTrainerDCTopk10_500epochs (Dice +
+    TopK10 compound) for the hedged replacement.
+    """
+
+    pass
+
+
+class nnUNetTrainerDCTopk10_500epochs(_Epochs500Mixin, nnUNetTrainerDCTopk10):
+    """Dice + TopK(k=10) compound loss at the 500-epoch budget, dataset002.
+
+    Hedged replacement for nnUNetTrainerTopk10_500epochs (pure TopK, confirmed
+    collapsed to an empty-mask solution -- see that class's docstring). Same
+    MAPPING-inspired hard-voxel-focus motivation, with Dice's overlap term as the
+    anti-collapse anchor pure TopK was missing. See
+    nnUNetTrainerLossVariants.nnUNetTrainerDCTopk10 for the loss construction.
+    """
+
+    pass
 
 
 class nnUNetTrainerLesionAwareSamplingPow_500epochs_full(_Epochs500Mixin, nnUNetTrainerLesionAwareSamplingPow):

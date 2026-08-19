@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 import torch
+from nnunetv2.training.loss.compound_losses import DC_and_topk_loss
 from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 
@@ -73,6 +74,41 @@ class nnUNetTrainerTverskyMild(nnUNetTrainer):
             self,
             DiceTverskyLoss(tversky_alpha=0.4, tversky_beta=0.6, ignore_index=_ignore_label(self)),
         )
+
+
+class nnUNetTrainerDCTopk10(nnUNetTrainer):
+    """Dice + TopK(k=10) compound loss -- same structure as nnU-Net's own default
+    Dice+CE compound loss (see nnUNetTrainer._build_loss), with the plain-CE half
+    replaced by TopK-CE: gradient only from the hardest 10% of per-voxel losses each
+    step, not averaged over all voxels.
+
+    Hedges nnU-Net's stock ``nnUNetTrainerTopk10Loss`` (pure TopK, no Dice/CE at all --
+    used for ``nnUNetTrainerTopk10_500epochs``, modeled on MAPPING's "DTK10" scheme,
+    arXiv:2211.15486) after it collapsed to predicting an entirely empty mask (0
+    nonzero voxels, verified directly on 2 real validation cases from its
+    checkpoint_latest.pth) on this dataset -- pure TopK/CE-family losses have no term
+    that punishes an empty prediction, a known real failure mode on a task this
+    imbalanced (lesions often <1% of the volume). Dice's overlap term (empty
+    prediction -> Dice=0, a strong penalty) is the anti-collapse anchor pure TopK was
+    missing; TopK's hard-voxel focus (MAPPING's stated rationale for helping small
+    lesions) is kept, not abandoned. See the 2026-08-19 CLAUDE.md entry for the
+    collapse evidence.
+    """
+
+    def _build_loss(self):
+        loss = DC_and_topk_loss(
+            {
+                "batch_dice": self.configuration_manager.batch_dice,
+                "smooth": 1e-5,
+                "do_bg": False,
+                "ddp": self.is_ddp,
+            },
+            {"k": 10},
+            weight_ce=1,
+            weight_dice=1,
+            ignore_label=self.label_manager.ignore_label,
+        )
+        return _wrap_with_deep_supervision(self, loss)
 
 
 class _Epochs250Mixin:

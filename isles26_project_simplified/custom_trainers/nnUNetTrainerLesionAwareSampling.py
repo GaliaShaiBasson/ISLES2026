@@ -131,6 +131,123 @@ class nnUNetTrainerLesionAwareSamplingPow_250epochs(nnUNetTrainerLesionAwareSamp
     CASE_METADATA_CSV_DEFAULT = "workspace/case_metadata_pow_p05.csv"
 
 
+class nnUNetTrainerLesionAwareSamplingPowCurriculum(nnUNetTrainerLesionAwareSampling):
+    """Power-law bin-level sampling with p annealed 0 -> 1 over training, instead of a
+    single fixed p (contrast with nnUNetTrainerLesionAwareSamplingPow's fixed p=0.5).
+
+    Rationale: early training on the natural (uniform) case distribution lets the
+    network learn generic features before being pushed toward the rare small-lesion
+    bin; p then ramps toward the full per-bin volume-mass correction later in training.
+    This is the same idea as "deferred re-weighting" in the long-tailed-recognition
+    literature (e.g. Cao et al. 2019 LDAM-DRW) -- reweight late, not from epoch 0.
+
+    Engineering note this class exists to work around: nnU-Net's training dataloader
+    runs inside worker processes spawned by NonDetMultiThreadedAugmenter (see
+    nnUNetTrainer.get_dataloaders), so mutating ``sampling_probabilities`` on the
+    in-process loader object would never reach the workers. Instead, p is recomputed
+    and the whole train+val dataloader pair is torn down and rebuilt (fresh worker
+    processes) every DATALOADER_REBUILD_EVERY_EPOCHS epochs, via on_train_epoch_start.
+    This makes p a step function (one value per REBUILD window), not truly continuous
+    -- 20 steps across a 500-epoch budget at the default cadence, which is a close
+    enough approximation given the alternative (single-process, num_processes=0
+    dataloader for genuinely continuous updates) would serialize data loading and
+    likely slow training meaningfully.
+
+    Reads case_id/size_bin/lesion_volume_mm3 directly (not a precomputed
+    sampling_weight column -- unlike the base class/fixed-p subclass, the weight
+    formula must be re-evaluated at a new p on every rebuild) from the same
+    dataset002 "_full" metadata CSV nnUNetTrainerLesionAwareSampling_500epochs_full
+    reads (workspace/case_metadata_full.csv) -- shared read-only input data, own
+    dedicated env var so an override never leaks between trainers.
+
+    Duplicates (deliberately, rather than importing) the power-law weight formula
+    from data_prep/metadata_utils.py:sampling_weights_from_size_bin_power -- see the
+    module docstring for why this file doesn't cross-import data_prep.
+    """
+
+    CASE_METADATA_CSV_ENV_VAR = "ISLES26_SAMPLING_POW_CURRICULUM_METADATA_CSV_FULL"
+    CASE_METADATA_CSV_DEFAULT = "workspace/case_metadata_full.csv"
+
+    P_START = 0.0
+    P_END = 1.0
+    DATALOADER_REBUILD_EVERY_EPOCHS = 25
+
+    def __init__(
+        self,
+        plans: dict,
+        configuration: str,
+        fold: int,
+        dataset_json: dict,
+        device: torch.device = torch.device("cuda"),
+    ):
+        super().__init__(plans, configuration, fold, dataset_json, device=device)
+        self._last_dataloader_rebuild_epoch: int | None = None
+
+    def _current_target_p(self) -> float:
+        rebuild_every = self.DATALOADER_REBUILD_EVERY_EPOCHS
+        steps_total = max(1, self.num_epochs // rebuild_every)
+        current_step = min(steps_total - 1, self.current_epoch // rebuild_every)
+        frac = current_step / max(1, steps_total - 1)
+        return self.P_START + frac * (self.P_END - self.P_START)
+
+    def _load_case_weights(self) -> dict[str, float]:
+        csv_path = Path(os.environ.get(self.CASE_METADATA_CSV_ENV_VAR, self.CASE_METADATA_CSV_DEFAULT))
+        if not csv_path.is_file():
+            raise RuntimeError(
+                f"Sampling metadata not found: {csv_path}. Run the project prepare command first."
+            )
+        frame = pd.read_csv(csv_path)
+        required = {"case_id", "size_bin", "lesion_volume_mm3"}
+        missing = required.difference(frame.columns)
+        if missing:
+            raise RuntimeError(f"Sampling metadata is missing columns: {sorted(missing)}")
+        if frame["case_id"].duplicated().any():
+            raise RuntimeError("Sampling metadata contains duplicate case_id values")
+
+        p = self._current_target_p()
+        bins = frame["size_bin"].astype(str)
+        volumes = pd.to_numeric(frame["lesion_volume_mm3"], errors="coerce")
+        if volumes.isna().any() or not np.isfinite(volumes.to_numpy(dtype=float)).all():
+            raise RuntimeError("lesion_volume_mm3 values must all be finite")
+        bin_totals = volumes.groupby(bins).sum()
+        bad_bins = bin_totals[(bin_totals <= 0) | bin_totals.isna()].index.tolist()
+        if bad_bins:
+            raise RuntimeError(f"Non-positive or missing total volume for size_bin(s): {bad_bins}")
+        bin_weight = (1.0 / bin_totals) ** float(p)
+        per_case = bins.map(bin_weight)
+        total = float(per_case.sum())
+        if not np.isfinite(total) or total <= 0:
+            raise RuntimeError("Could not derive finite sampling weights from size-bin power weighting")
+        weights = (per_case / total).astype(float)
+
+        self._last_dataloader_rebuild_epoch = self.current_epoch
+        self.print_to_log_file(
+            f"[LesionAwareSamplingPowCurriculum] epoch {self.current_epoch}: p={p:.4f}"
+        )
+        return dict(zip(frame["case_id"].astype(str), weights))
+
+    def on_train_epoch_start(self):
+        super().on_train_epoch_start()
+        rebuild_every = self.DATALOADER_REBUILD_EVERY_EPOCHS
+        due = (
+            self.current_epoch % rebuild_every == 0
+            and self.current_epoch != self._last_dataloader_rebuild_epoch
+        )
+        if due:
+            self._rebuild_dataloaders()
+
+    def _rebuild_dataloaders(self) -> None:
+        from batchgenerators.dataloading.multi_threaded_augmenter import MultiThreadedAugmenter
+        from batchgenerators.dataloading.nondet_multi_threaded_augmenter import (
+            NonDetMultiThreadedAugmenter,
+        )
+
+        for loader in (self.dataloader_train, self.dataloader_val):
+            if isinstance(loader, (MultiThreadedAugmenter, NonDetMultiThreadedAugmenter)):
+                loader._finish()
+        self.dataloader_train, self.dataloader_val = self.get_dataloaders()
+
+
 class nnUNetTrainerLesionAwareSamplingPow(nnUNetTrainerLesionAwareSampling):
     """Power-law (p=0.5) bin-level sampling weights, with NO epoch-budget mixin baked in --
     combine with whichever epoch mixin the target run needs (mirrors how

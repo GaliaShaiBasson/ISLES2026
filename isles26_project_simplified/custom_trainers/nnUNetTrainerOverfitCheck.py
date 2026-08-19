@@ -98,8 +98,10 @@ class _OverfitCheckMixin:
 # --- Concrete combos: add one per trainer that needs gating before a real launch. ---
 
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer  # noqa: E402
+from nnunetv2.training.nnUNetTrainer.variants.loss.nnUNetTrainerTopkLoss import nnUNetTrainerTopk10Loss  # noqa: E402
 
 from .nnUNetTrainerLesionAwareSampling import nnUNetTrainerLesionAwareSamplingPow  # noqa: E402
+from .nnUNetTrainerLossVariants import nnUNetTrainerDCTopk10  # noqa: E402
 from .nnUNetTrainerWideAug import nnUNetTrainerWideAug  # noqa: E402
 
 
@@ -124,6 +126,36 @@ class nnUNetTrainerBaseline_OverfitCheck(_OverfitCheckMixin, nnUNetTrainer):
     the identical cases; if it ALSO shows a flat/near-zero Pseudo Dice trend, the flat
     result is explained by the short budget/tiny-n interaction, not by anything specific
     to nnUNetTrainerWideAug's overridden ``get_training_transforms``.
+    """
+
+    pass
+
+
+class nnUNetTrainerTopk10_OverfitCheck(_OverfitCheckMixin, nnUNetTrainerTopk10Loss):
+    """Gate for nnUNetTrainerTopk10_500epochs before launching it for real.
+
+    Pure TopK(k=10) loss has no Dice/CE term at all -- worth specifically confirming
+    it produces a real learning trend on a tiny subset before trusting it for hours
+    of unattended GPU time, since it's a bigger departure from every loss variant
+    already verified live in this project (all of which keep some Dice component).
+
+    Usage:
+      python isles26.py train overfit-check-topk10 --dataset-id 999 --dataset-name ATLASsample
+    """
+
+    pass
+
+
+class nnUNetTrainerDCTopk10_OverfitCheck(_OverfitCheckMixin, nnUNetTrainerDCTopk10):
+    """Gate for nnUNetTrainerDCTopk10_500epochs before launching it for real.
+
+    Non-negotiable this time: nnUNetTrainerTopk10_500epochs (pure TopK, no gate run
+    beforehand) collapsed to an empty-mask prediction on a real launch -- see
+    nnUNetTrainerTopk10_500epochs's docstring. This compound loss should have Dice's
+    anti-collapse anchor, but that's a hypothesis to verify here, not assume.
+
+    Usage:
+      python isles26.py train overfit-check-dctopk10 --dataset-id 999 --dataset-name ATLASsample
     """
 
     pass
