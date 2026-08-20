@@ -57,7 +57,16 @@ SUMMARY_PREFIX = {"dice": "dice", "hd95_mm": "hd95", "lesion_f1": "lesion_f1"}
 
 
 def discover_runs(runs_dir: Path) -> dict[str, Path]:
-    """Map a human-readable trainer name -> its results_val.csv path."""
+    """Map a human-readable trainer name -> its results_val.csv path.
+
+    Keyed by trainer name *and* plans identifier, not trainer name alone --
+    two runs can share a trainer class (e.g. `nnUNetTrainerBaseline_500epochs`
+    trained under the default plans vs. under `nnUNetResEncUNetMPlans`) while
+    being genuinely different models. Keying by trainer name only would make
+    the second overwrite the first in this dict silently, dropping it from
+    every downstream comparison with no error. Non-default plans get a
+    `(plans_name)` suffix; the default (`plans` missing/None/"nnUNetPlans")
+    keeps the plain trainer name so existing output/CSVs stay unchanged."""
     out = {}
     for csv_path in sorted(runs_dir.glob("*/results_val.csv")):
         run_dir = csv_path.parent
@@ -67,8 +76,16 @@ def discover_runs(runs_dir: Path) -> dict[str, Path]:
             try:
                 manifest = json.loads(manifest_path.read_text())
                 name = manifest.get("trainer", name)
+                plans = manifest.get("plans")
+                if plans and plans != "nnUNetPlans":
+                    name = f"{name} ({plans})"
             except (json.JSONDecodeError, OSError):
                 pass
+        if name in out:
+            raise SystemExit(
+                f"discover_runs: duplicate trainer+plans key '{name}' from both "
+                f"{out[name].parent} and {run_dir} -- refusing to silently drop one."
+            )
         out[name] = csv_path
     return out
 

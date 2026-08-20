@@ -100,7 +100,19 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         rid = run_id_from_fingerprint(fingerprint)
         run_dir = Path(env["ISLES26_RESULTS_DIR"]) / "runs" / rid
         split = args.split or "results"
-        experiment_name = args.experiment or args.trainer
+        # Plans identifier must be part of the default experiment name, not just the
+        # trainer name -- nnU-Net namespaces checkpoints by trainer+plans+config+fold
+        # (so e.g. Baseline_500epochs on default plans and on ResEnc M plans are
+        # genuinely different runs with different results), but experiment_name used
+        # to drop plans entirely, so two plans variants of the same trainer collided
+        # under one identical "experiment" value in the combined results CSV --
+        # aggregate's duplicate-row check (correctly) refused to merge them. Default
+        # plans keeps the plain trainer name (no suffix) for backward compatibility
+        # with already-written results; any other plans identifier gets appended.
+        default_experiment_name = (
+            args.trainer if plans_identifier == "nnUNetPlans" else f"{args.trainer}__{plans_identifier}"
+        )
+        experiment_name = args.experiment or default_experiment_name
         out_csv = Path(args.out_csv).expanduser().resolve() if args.out_csv else run_dir / f"results_{split}.csv"
         checkpoint_dir = _output_folder(args.trainer, dataset_id, dataset_name, configuration, fold, env, plans_identifier)
     else:
@@ -128,7 +140,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         shutil.move(str(out_csv), str(archived))
         print(f"[archive] Moved previous result aside (not deleted): {archived}")
 
-    if run_dir is not None:
+    if run_dir is not None and not args.print_only:
         run_dir.mkdir(parents=True, exist_ok=True)
 
     if args.case_metadata_csv:

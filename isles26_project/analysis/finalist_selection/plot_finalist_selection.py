@@ -84,12 +84,17 @@ PALETTE = [
 ]
 BLUE_SEQUENTIAL = ["#cde2fb", "#86b6ef", "#3987e5", "#2a78d6", "#1c5cab", "#0d366b"]
 SHORT_LABEL_STRIP = ("nnUNetTrainer", "_500epochs_full", "_500epochs")
+# Cosmetic renames applied after stripping, for the "(plans)" suffix
+# discover_runs() appends when a trainer was run under non-default plans.
+SHORT_LABEL_RENAME = {"(nnUNetResEncUNetMPlans)": "(ResEncM)"}
 
 
 def short_name(trainer: str) -> str:
     name = trainer
     for tok in SHORT_LABEL_STRIP:
         name = name.replace(tok, "")
+    for old, new in SHORT_LABEL_RENAME.items():
+        name = name.replace(old, new)
     return name or trainer
 
 
