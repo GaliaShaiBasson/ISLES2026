@@ -133,23 +133,42 @@ def parse_logs_merged(paths):
 
 def discover_runs_from_index(runs_index_path, trainers=None):
     """Auto-discover {trainer_name: parsed_data} from a runs_index.csv (as
-    written by isles26.py aggregate): one entry per unique trainer, its
-    training log(s) found next to its checkpoint_final."""
+    written by isles26.py aggregate): one entry per unique trainer+plans, its
+    training log(s) found next to its checkpoint_final.
+
+    Keyed by trainer name *and* plans identifier, not trainer name alone --
+    matching the fix in analysis/finalist_selection/select_finalist_from_val.py
+    (same underlying bug: two trainers now share a class name across plans,
+    e.g. Baseline/WideAugBaseline each have a standard-plans and a
+    nnUNetResEncUNetMPlans run -- keying by trainer alone would silently drop
+    one of every such pair via dict overwrite/setdefault instead of erroring).
+    Non-default plans get a `(plans_name)` suffix; the default (`plans`
+    missing/None/"nnUNetPlans") gets no suffix, so existing single-plans
+    labels/filenames stay unchanged."""
     if not os.path.exists(runs_index_path):
         raise SystemExit(
             f"--runs-index not found: {runs_index_path!r}. Pass --log explicitly, or --runs-index "
             "pointing at the CSV written by 'isles26.py aggregate'."
         )
-    fold_dirs = {}  # trainer -> fold_0 dir
+    fold_dirs = {}  # "trainer" or "trainer (plans)" -> fold_0 dir
     with open(runs_index_path, newline="") as f:
         for row in csv.DictReader(f):
             trainer = row.get("trainer")
             checkpoint = row.get("checkpoint_final")
             if not trainer or not checkpoint:
                 continue
-            if trainers and trainer not in trainers:
+            plans = row.get("plans")
+            name = f"{trainer} ({plans})" if plans and plans != "nnUNetPlans" else trainer
+            if trainers and name not in trainers and trainer not in trainers:
                 continue
-            fold_dirs.setdefault(trainer, os.path.dirname(checkpoint))
+            if name in fold_dirs and fold_dirs[name] != os.path.dirname(checkpoint):
+                raise SystemExit(
+                    f"discover_runs_from_index: duplicate trainer+plans key {name!r} from two different "
+                    f"checkpoint dirs ({fold_dirs[name]!r} vs {os.path.dirname(checkpoint)!r}) -- "
+                    "runs_index.csv has an unexpected collision, not the standard-plans-vs-ResEncM case "
+                    "this suffix already handles."
+                )
+            fold_dirs[name] = os.path.dirname(checkpoint)
 
     if trainers:
         missing = set(trainers) - set(fold_dirs)
@@ -217,6 +236,14 @@ def main():
         print(f"{label}: parsed {n} epochs (final pseudo dice {final_dice:.4f})")
 
     # --- Learning curves: train loss, val loss, pseudo dice ---
+    # Legend lives outside the axes (right-hand column) rather than inline --
+    # with auto-discovery pulling in as many as 9+ trainers, an in-axes legend
+    # box was large enough to cover real plot area (e.g. the pseudo-Dice
+    # panel's late-training plateau, exactly where the curves are closest
+    # together and hardest to read through a legend on top of them). One
+    # shared legend (built from the last panel's handles -- every panel plots
+    # the same trainers in the same order) instead of repeating it 3x also
+    # cuts redundant clutter.
     fig, axes = plt.subplots(3, 1, figsize=(9, 11))
     panels = [
         ("train_loss", "Train loss", "training loss vs epoch"),
@@ -228,12 +255,28 @@ def main():
             ax.plot(d["epoch"], d[key], label=label, color=colors[label], lw=1.2)
         ax.set_ylabel(ylabel)
         ax.set_title(f"Baseline: {title}")
-        ax.legend()
         ax.grid(alpha=0.3)
     axes[-1].set_xlabel("Epoch")
-    fig.tight_layout()
+    handles, labels = axes[-1].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=8)
+    # Loss values are NOT on a shared scale across loss-function families --
+    # e.g. Baseline/WideAugBaseline/the 3 sampling variants use nnU-Net's
+    # stock DC+CE (Dice term is negative-going, so these dive below 0), while
+    # FocalTversky is a bounded [0,1] Tversky term (no CE, no negative Dice
+    # term -- starts near 1) and TverskyMild sums a full Dice term *and* a
+    # full Tversky term (starts highest of all). Each trainer's own loss
+    # formula fixes its scale/starting value by construction; only Pseudo
+    # Dice (bottom panel) is computed identically for every condition and is
+    # the actual cross-condition comparison metric -- see custom_trainers/losses.py.
+    fig.text(
+        0.5, 0.005,
+        "Note: train/val loss is not comparable across different loss functions (each has its own "
+        "formula/scale) -- only the Pseudo Dice panel is a like-for-like cross-condition metric.",
+        ha="center", va="bottom", fontsize=8, style="italic", color="#444444",
+    )
+    fig.tight_layout(rect=(0, 0.02, 1, 1))
     out1 = os.path.join(args.out_dir, f"learning_curves_{args.tag}.png")
-    fig.savefig(out1, dpi=150)
+    fig.savefig(out1, dpi=150, bbox_inches="tight")
     print(f"saved {out1}")
 
     # --- Learning rate schedule ---
@@ -243,11 +286,11 @@ def main():
     ax2.set_xlabel("Epoch")
     ax2.set_ylabel("Learning rate")
     ax2.set_title("Baseline: learning-rate schedule (PolyLR)")
-    ax2.legend()
+    ax2.legend(loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=8)
     ax2.grid(alpha=0.3)
     fig2.tight_layout()
     out2 = os.path.join(args.out_dir, f"lr_schedule_{args.tag}.png")
-    fig2.savefig(out2, dpi=150)
+    fig2.savefig(out2, dpi=150, bbox_inches="tight")
     print(f"saved {out2}")
 
     # --- Train vs val loss overlay, one small-multiple subplot per trainer ---
