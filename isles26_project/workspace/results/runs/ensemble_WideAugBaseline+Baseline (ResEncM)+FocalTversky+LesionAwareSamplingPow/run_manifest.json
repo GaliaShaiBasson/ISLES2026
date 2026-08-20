@@ -1,0 +1,14 @@
+{
+  "case_metadata_csv": "workspace/splits_dataset002/manifest.csv",
+  "ensemble_members": [
+    "nnUNetTrainerWideAugBaseline_500epochs",
+    "nnUNetTrainerBaseline_500epochs (nnUNetResEncUNetMPlans)",
+    "nnUNetTrainerFocalTversky_500epochs",
+    "nnUNetTrainerLesionAwareSamplingPow_500epochs_full"
+  ],
+  "gt_dir": "/home/galia/ISLES2026/nnUNet_raw/Dataset002_ATLAS/labelsTs",
+  "is_ensemble": true,
+  "run_id": "ensemble_WideAugBaseline+Baseline (ResEncM)+FocalTversky+LesionAwareSamplingPow",
+  "split": "test",
+  "trainer": "ensemble_WideAugBaseline+Baseline (ResEncM)+FocalTversky+LesionAwareSamplingPow"
+}
