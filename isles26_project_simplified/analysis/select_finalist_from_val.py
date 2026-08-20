@@ -56,8 +56,12 @@ LOWER_IS_BETTER = {"hd95_mm"}
 SUMMARY_PREFIX = {"dice": "dice", "hd95_mm": "hd95", "lesion_f1": "lesion_f1"}
 
 
-def discover_runs(runs_dir: Path) -> dict[str, Path]:
-    """Map a human-readable trainer name -> its results_val.csv path.
+def discover_runs(runs_dir: Path, filename: str = "results_val.csv") -> dict[str, Path]:
+    """Map a human-readable trainer name -> its `filename` path (default
+    `results_val.csv`; pass `filename="results_test.csv"` to discover
+    already-scored held-out results instead -- e.g. `ensembling/
+    ensemble_test.py` reuses this to read existing single-model test_id/
+    test_ood scores for comparison, without recomputing them).
 
     Keyed by trainer name *and* plans identifier, not trainer name alone --
     two runs can share a trainer class (e.g. `nnUNetTrainerBaseline_500epochs`
@@ -68,7 +72,7 @@ def discover_runs(runs_dir: Path) -> dict[str, Path]:
     `(plans_name)` suffix; the default (`plans` missing/None/"nnUNetPlans")
     keeps the plain trainer name so existing output/CSVs stay unchanged."""
     out = {}
-    for csv_path in sorted(runs_dir.glob("*/results_val.csv")):
+    for csv_path in sorted(runs_dir.glob(f"*/{filename}")):
         run_dir = csv_path.parent
         manifest_path = run_dir / "run_manifest.json"
         name = run_dir.name
