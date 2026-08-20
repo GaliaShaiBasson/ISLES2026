@@ -334,12 +334,13 @@ same fold for every method (see the controlled-comparison rules above).
 
 ## Finalist-selection / ensembling-candidate analysis (2026-08-20)
 
-Ran `analysis/select_finalist_from_val.py`, `analysis/plot_finalist_selection.py`,
-and `analysis/pca_model_redundancy.py` over all 9 trained val results (the
-original 7 500-epoch conditions plus the two ResEncM-plans runs, `baseline`
-and `wideaug`, both finished since the "Status as of 2026-08-19" entry above).
-Output: `workspace/evaluation/finalist_selection/*.csv` and
-`workspace/figures/finalist_selection/*.png`.
+Ran `analysis/finalist_selection/select_finalist_from_val.py`,
+`analysis/finalist_selection/plot_finalist_selection.py`, and
+`analysis/finalist_selection/pca_model_redundancy.py` over all 9 trained val
+results (the original 7 500-epoch conditions plus the two ResEncM-plans
+runs, `baseline` and `wideaug`, both finished since the "Status as of
+2026-08-19" entry above). Output: `workspace/results/finalist_selection/*.csv`
+and `workspace/figures/finalist_selection/*.png`.
 
 **Bug fixed first, not cosmetic:** `discover_runs()` (in
 `select_finalist_from_val.py`) keyed runs by trainer class name only. Since
