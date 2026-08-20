@@ -29,7 +29,7 @@
 # immediately if the GPU is already free, and `isles26.py train` resumes
 # rather than restarts if a partial checkpoint already exists.
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 
 PY=/home/galia/miniconda3/envs/isles2026/bin/python
 export nnUNet_extTrainer=/home/galia/ISLES2026/isles26_project

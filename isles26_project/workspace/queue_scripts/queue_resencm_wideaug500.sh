@@ -20,7 +20,7 @@
 # verified below (empty-dir check) before this script was launched, never collides with
 # the existing default-plans wideaug-500 run.
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 
 PY=/home/galia/miniconda3/envs/isles2026/bin/python
 PREDICT=/home/galia/miniconda3/envs/isles2026/bin/nnUNetv2_predict

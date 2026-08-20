@@ -9,7 +9,7 @@
 # was staged) -- queues behind it rather than contending, same reasoning as
 # run_500ep_full_experiment.sh's wait loop.
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 
 PY=/home/galia/miniconda3/envs/isles2026/bin/python
 PREDICT=/home/galia/miniconda3/envs/isles2026/bin/nnUNetv2_predict

@@ -20,7 +20,7 @@
 # (nnUNetTrainerLesionAwareSampling_500epochs_full__nnUNetResEncUNetMPlans__3d_fullres/
 # fold_0) -- distinct from the existing default-plans sampling-500 run.
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 
 PY=/home/galia/miniconda3/envs/isles2026/bin/python
 PREDICT=/home/galia/miniconda3/envs/isles2026/bin/nnUNetv2_predict

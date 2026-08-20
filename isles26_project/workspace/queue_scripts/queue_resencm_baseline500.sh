@@ -23,7 +23,7 @@
 # written to be distinct from the existing default-plans baseline-500 folder,
 # never collides with or overwrites it.
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 
 PY=/home/galia/miniconda3/envs/isles2026/bin/python
 PREDICT=/home/galia/miniconda3/envs/isles2026/bin/nnUNetv2_predict

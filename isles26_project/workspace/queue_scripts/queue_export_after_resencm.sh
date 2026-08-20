@@ -21,7 +21,7 @@
 # would recreate the real contention problem the guard exists to prevent)
 # -- sequential is correct and already fast enough on GPU.
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+cd "$(dirname "$0")/../.." || exit 1
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
