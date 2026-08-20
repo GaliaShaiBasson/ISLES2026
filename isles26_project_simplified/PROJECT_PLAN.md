@@ -225,10 +225,15 @@ at 500 epochs on `Dataset002_ATLAS` before either of these two nights.
 - **The final run has landed (2026-08-19)** — all 7 conditions are trained,
   predicted, and evaluated at 500 epochs / `Dataset002`; see "Status as of
   2026-08-19" above for what came out of it and what's still open.
-- **Prediction ensembling** (softmax-averaging across finished checkpoints)
-  remains deferred — per-case probabilities are now saved for every
-  condition (`predTs_prob/`, see above), so the prerequisite data exists;
-  still no code in `evaluation/` for it yet.
+- **Prediction ensembling** — code now exists (`ensembling/ensemble_val.py`
+  + `analysis/{select_finalist_from_val,plot_finalist_selection,
+  pca_model_redundancy}.py`); per-case-Dice-correlation/PCA analysis run
+  2026-08-20 over all 9 val results (see "Finalist-selection /
+  ensembling-candidate analysis" below) recommends WideAugBaseline +
+  Baseline(ResEncM) + FocalTversky + LesionAwareSamplingPow as the ensemble
+  candidate set. Still pending: exporting `predVal_prob/` for that set and
+  running `ensemble_val.py` itself to confirm on real voxel-probability
+  correlation + actual ensembled scores, not just the case-Dice proxy.
 
 ## Report deliverables — what's ready vs. what needs building
 
@@ -327,6 +332,69 @@ same fold for every method (see the controlled-comparison rules above).
   dataset download** — not yet verified as of this writing; check before
   relying on case-discovery counts in the report.
 
+## Finalist-selection / ensembling-candidate analysis (2026-08-20)
+
+Ran `analysis/select_finalist_from_val.py`, `analysis/plot_finalist_selection.py`,
+and `analysis/pca_model_redundancy.py` over all 9 trained val results (the
+original 7 500-epoch conditions plus the two ResEncM-plans runs, `baseline`
+and `wideaug`, both finished since the "Status as of 2026-08-19" entry above).
+Output: `workspace/evaluation/finalist_selection/*.csv` and
+`workspace/figures/finalist_selection/*.png`.
+
+**Bug fixed first, not cosmetic:** `discover_runs()` (in
+`select_finalist_from_val.py`) keyed runs by trainer class name only. Since
+`nnUNetTrainerBaseline_500epochs` and `nnUNetTrainerWideAugBaseline_500epochs`
+each now have two runs (standard plans vs. `nnUNetResEncUNetMPlans`), the
+ResEncM run was silently overwriting its standard-plans sibling in the dict —
+2 of 9 runs would have vanished from every downstream comparison with no
+error. Fixed to key by trainer **+ plans** (non-default plans get a
+`(PlansName)` suffix, e.g. `(ResEncM)`), and to raise loudly instead of
+silently dropping on any future collision. All 9 runs share the identical 119
+val cases, so the paired comparison is valid.
+
+**Ranking (hd95_mm primary, val):** WideAugBaseline leads, but FocalTversky,
+Baseline(ResEncM), TverskyMild, and plain Baseline are all statistically tied
+with it (paired bootstrap, no significant separation from #1). Only the 3
+LesionAwareSampling variants (plain, Pow, PowCurriculum) are significantly
+worse.
+
+**Correlation/PCA says there are ~4 real axes of behavior among the 9, not 9
+independent models** — the basis for an ensembling recommendation:
+- Standard-plans "generic" cluster (r≈0.96–0.98, effectively redundant):
+  WideAugBaseline, Baseline, LesionAwareSampling → keep only **WideAugBaseline**
+  (best-ranked).
+- ResEncM-plans cluster (r=0.95 with each other, but its own distinct PCA
+  region — a genuinely different architecture/plans axis): Baseline(ResEncM),
+  WideAugBaseline(ResEncM) → keep only **Baseline(ResEncM)** (best-ranked;
+  also the single lowest pairwise correlation found anywhere, r=0.741 vs.
+  TverskyMild — the most complementary pair on this dataset).
+- Tversky-loss family (r=0.95 with each other — borderline-redundant even
+  though the 0.95 cutoff didn't formally merge them): FocalTversky,
+  TverskyMild → keep only **FocalTversky** (ties for #1, marginally ahead).
+- Sampling-correction family (its own distinct PCA axis, but both
+  significantly worse than the top on hd95_mm): LesionAwareSamplingPow,
+  LesionAwareSamplingPowCurriculum → keep only **LesionAwareSamplingPow**
+  (better of the two: hd95 21.9mm vs. 22.1mm).
+
+**Recommended ensemble candidate set: `WideAugBaseline + Baseline(ResEncM) +
+FocalTversky + LesionAwareSamplingPow`** — one representative per distinct
+error-pattern cluster, chosen to maximize complementary errors rather than
+just raw solo rank. This differs from `ensemble_val.py`'s current hardcoded
+`DEFAULT_TRAINERS` (still the pre-ResEncM 5: WideAugBaseline, FocalTversky,
+TverskyMild, LesionAwareSamplingPow, LesionAwareSamplingPowCurriculum) and
+from `export_val_probabilities.sh`'s `TRAINERS` array (same stale 5) —
+**not yet updated to match this recommendation**, pending the raw-probability
+follow-up below.
+
+**Caveat — this is a proxy, not the final call.** All of the above is built
+from per-case *binary-mask* Dice correlation (`load_all`'s `dice` column),
+not the actual voxel-level softmax probabilities the real ensemble would
+average. `ensemble_val.py` exists precisely to check this proxy against (a)
+per-voxel probability correlation and (b) real ensembled Dice/HD95/lesion-F1
+scored against the best single model — run that (needs `predVal_prob/`
+exported per trainer first, via `export_val_probabilities.sh`) before
+finalizing which trainers actually go into the shipped ensemble.
+
 ## Future work (beyond this report)
 
 - **Per-condition threshold tuning** (0.5 → best-found, via
@@ -335,9 +403,10 @@ same fold for every method (see the controlled-comparison rules above).
   `predTs_prob/` exists for each — natural next exploratory pass once the
   report's fixed deliverables are locked, since it's the same probability
   data prediction ensembling will need.
-- **Prediction ensembling** (softmax-averaging across the 7 finished
-  checkpoints) — zero GPU cost, prerequisite data (`predTs_prob/`) now
-  exists for every condition; no code in `evaluation/` yet.
+- **Prediction ensembling** — see the "Finalist-selection /
+  ensembling-candidate analysis" section above for the current
+  recommendation and what's still pending (real voxel-probability
+  confirmation via `ensembling/ensemble_val.py`).
 - **Domain-adversarial training** (gradient-reversal domain classifier on
   encoder features) — only worth revisiting if the `test_id`/`test_ood` gap
   is still meaningful after the `wideaug` result. See `CLAUDE.md` for the

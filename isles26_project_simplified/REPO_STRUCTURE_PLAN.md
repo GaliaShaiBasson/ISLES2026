@@ -123,8 +123,106 @@ ISLES2026/
 
 ## Status
 
-Not started. When we pick this up: use `git mv` for tracked files, plain
-`mv` for untracked/gitignored ones, update `.gitignore` and any hardcoded
-paths in `isles26.py`/scripts that reference the old locations (e.g.
-`workspace/evaluation`, `workspace/figures`), and update the README's
-structure section to match.
+**Directory reorganization done, code references NOT yet updated.**
+
+A full duplicate was made at `../isles26_project/` (untracked, sibling to
+this dir) and reorganized into the target layout below. This directory
+(`isles26_project_simplified/`) was left untouched throughout — it's still
+the working/tracked copy until the switchover.
+
+Applied inside `isles26_project/`:
+- `docs/` (+ `docs/reference/` for the two PDFs) — pulled from the loose
+  doc files at root (`ISLES2026_challenge.md`, `run_instructions.md`
+  renamed from `run instructions`; `PROJECT_PLAN.md`/`PROJECT_REVIEW.md`/
+  `README.md`/`CLAUDE.md` stayed at root)
+- `scripts/` — core pipeline drivers only: `check_status.sh`,
+  `sanity_overfit_check.sh`, `run_full_experiment.sh`,
+  `run_500ep_full_experiment.sh`, `run_postprocess_grid.sh`
+- Root `figures/` merged into `workspace/figures/`, root copy removed
+- `workspace/evaluation/` renamed to `workspace/results/`
+- `workspace/archive/` + `workspace/evaluation/archive/` collapsed into one
+  `workspace/archive/results_archive/`
+- `workspace/case_metadata_*.csv` (4 files) → `workspace/case_metadata/`
+- Loose `workspace/*.log` → `workspace/logs/`
+- **All** queue/launcher scripts, regardless of prior location, consolidated
+  into `workspace/queue_scripts/` (8 files) — these are one-off/disposable
+  run-launch helpers, not reusable source, so they live with the other
+  runtime/workspace stuff rather than in `scripts/`. Pulled in from
+  `scripts/` (`queue_postprocess_after_samplingpow.sh`), `ensembling/`
+  (`queue_export_after_resencm.sh`), and the original loose
+  `workspace/*.sh` files (`queue_dctopk10.sh`, `queue_resencm_*.sh` x3,
+  `queue_baseline1000_after_resencm_export.sh`, `predict_prob_remaining.sh`)
+- Prediction/postprocess output dirs (`postprocess_grid/`,
+  `postprocess_test/`, `smoketest_predVal_prob/`, `val_images_staged/`,
+  `val_images_staged_smoketest/`) → `workspace/predictions/`
+- `workspace/figures/` further split by topic instead of flat:
+  `learning_curves/`, `results_comparison/`, `threshold_analysis/`
+  (alongside the pre-existing `augmentation_examples/` and
+  `finalist_selection/`)
+
+- `analysis/finalist_selection/` — grouped `select_finalist_from_val.py`,
+  `plot_finalist_selection.py`, `pca_model_redundancy.py` under a subfolder.
+  These three are finalist-selection-specific analysis (read existing
+  `results_val.csv`s, never touch GPU/CPU); kept them inside `analysis/`
+  rather than merging into `ensembling/`, since `ensembling/` actually runs
+  predictions and produces new artifacts — a real, worth-preserving
+  distinction (`ensemble_val.py`'s own docstring draws this line: "not a
+  proxy (the per-case-Dice correlation/PCA in `analysis/`), the actual
+  averaged prediction"). The subfolder just makes the relationship between
+  the two visible instead of leaving them as unmarked flat files.
+
+Not yet addressed: queue-script `.log` output is still split across
+`workspace/logs/` and `workspace/archive/logs/`, not paired up with (or
+named to match) the queue script that produced it.
+
+Still open / deliberately left as-is, needs a decision before the
+switchover:
+- `initial_nb.ipynb` (repo root, outside this project dir) — likely dead,
+  confirm before archiving
+- `training/` — old `.sh`/`.ps1` pairs, possibly superseded by `isles26.py`
+- `workspace/splits/` vs `splits_full/` vs `splits_sample/` naming —
+  distinction not obvious from names alone, needs documenting or
+  consolidating
+
+## .gitignore
+
+Added a dedicated `--- isles26_project (new, reorganized project root) ---`
+section to the repo-root `.gitignore`, mirroring the existing
+`isles26_project_simplified/workspace/...` specific-path ignores but updated
+for the new layout (`postprocess_test/`, `postprocess_grid/`, and
+`val_images_staged` now live under `workspace/predictions/`; `sample_run/`
+is unchanged):
+
+```
+isles26_project/workspace/predictions/postprocess_test/diceonly250_predTs_cc10
+isles26_project/workspace/sample_run/predTs_cc_test
+isles26_project/workspace/predictions/postprocess_grid
+isles26_project/workspace/predictions/val_images_staged
+isles26_project/workspace/predictions/smoketest_predVal_prob
+```
+
+`smoketest_predVal_prob/` (two ~8 MB `.npz` probability arrays) was found
+missing from this list during a non-ignored-file-size sanity check and added
+after, mirrored into the `isles26_project_simplified/` section too. Total
+non-ignored size under `isles26_project/` dropped from ~25 MB to ~8.3 MB
+after the fix — sane for a git repo.
+
+Everything else in `.gitignore` (`nnUNet_raw/`/`nnUNet_preprocessed/`/
+`nnUNet_results/`, `archive/`, `**/final_holdout/`, the bare `figures/`
+rule, `.env`, `__pycache__/`, etc.) is unscoped/pattern-based and already
+applies to `isles26_project/` without changes — those didn't need mirroring.
+
+Deliberately **kept** the old `isles26_project_simplified/...` ignore lines
+rather than replacing them — that directory is still the live, tracked
+project until the switchover is actually complete. Remove them once
+`isles26_project_simplified/` is retired.
+
+**Not done yet — the actual blocker before `isles26_project/` is usable:**
+every hardcoded path in `isles26.py` and the scripts (`workspace/evaluation`,
+`workspace/figures` at root, `workspace/case_metadata_*.csv`, etc.) still
+points at the *old* locations. Nothing in `isles26_project/` will run
+correctly until that reference pass happens. When it does: update
+`.gitignore` too (paths like `isles26_project_simplified/workspace/...`
+need the `isles26_project/` equivalent), decide whether
+`isles26_project_simplified/` gets deleted or kept as a fallback, and
+update the README's structure section to match.

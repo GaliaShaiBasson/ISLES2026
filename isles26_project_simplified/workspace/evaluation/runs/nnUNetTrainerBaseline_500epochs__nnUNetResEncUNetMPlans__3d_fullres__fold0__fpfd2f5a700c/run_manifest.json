@@ -1,0 +1,21 @@
+{
+  "case_metadata_csv": "workspace/splits_full/manifest.csv",
+  "checkpoint_final": "/home/galia/ISLES2026/nnUNet_results/Dataset002_ATLAS/nnUNetTrainerBaseline_500epochs__nnUNetResEncUNetMPlans__3d_fullres/fold_0/checkpoint_final.pth",
+  "checkpoint_final_mtime": "2026-08-20T04:04:45",
+  "configuration": "3d_fullres",
+  "dataset": "Dataset002_ATLAS",
+  "experiment_name": "nnUNetTrainerBaseline_500epochs__nnUNetResEncUNetMPlans",
+  "fold": "0",
+  "git_commit": "fbb9e647fb344dd7c221876518e02e9b54452a22",
+  "gt_dir": "/home/galia/ISLES2026/nnUNet_raw/Dataset002_ATLAS/labelsTs",
+  "n_folds_in_split": 1,
+  "num_epochs": 500,
+  "plans": "nnUNetResEncUNetMPlans",
+  "pred_dir": "/home/galia/ISLES2026/nnUNet_results/Dataset002_ATLAS/nnUNetTrainerBaseline_500epochs__nnUNetResEncUNetMPlans__3d_fullres/fold_0/predTs",
+  "recorded_at": "2026-08-20T04:38:33",
+  "run_id": "nnUNetTrainerBaseline_500epochs__nnUNetResEncUNetMPlans__3d_fullres__fold0__fpfd2f5a700c",
+  "sampling_weight_hash": null,
+  "save_every": 10,
+  "split": "test",
+  "trainer": "nnUNetTrainerBaseline_500epochs"
+}

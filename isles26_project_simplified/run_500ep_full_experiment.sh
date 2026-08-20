@@ -109,10 +109,22 @@ for group in "${ORDER[@]}"; do
     continue
   fi
 
-  log "--- predict held-out test set ($group) ---"
+  log "--- predict held-out test set ($group), with probabilities ---"
   pred_dir="$out_folder/predTs"
+  # --save_probabilities in the SAME predict call, not a separate later pass --
+  # the flag only changes what gets exported after inference (extra .npz/.pkl
+  # alongside the .nii.gz), not the forward-pass computation itself, so a
+  # second predict run to add it after the fact duplicates GPU compute for no
+  # reason. Learned this the expensive way: baseline-500 through
+  # sampling-pow-500 were all predicted without it, then had to be
+  # re-predicted from scratch into a separate predTs_prob/ (see
+  # workspace/predict_prob_remaining.sh) just to get probability exports for
+  # ensembling. Prerequisite for ensembling multiple trainers' predictions
+  # (nnUNetv2_predict --help: "Required if you want to ensemble multiple
+  # configurations").
   $PREDICT -i "$DATASET_DIR/imagesTs" -o "$pred_dir" \
     -d "$DATASET_ID" -c "$CONFIG" -tr "$trainer" -f "$FOLD" \
+    --save_probabilities \
     || log "[FAIL] predict $group"
 
   log "--- evaluate $group (val) ---"

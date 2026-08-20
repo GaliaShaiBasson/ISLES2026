@@ -3,11 +3,20 @@
 (the per-case-Dice correlation/PCA in analysis/), the actual averaged
 prediction, evaluated the same way every single model was.
 
-Expected input: `predVal_prob/` directories written by
-`export_val_probabilities.sh` under each shortlisted trainer's normal
-nnU-Net results path (`.../fold_0/predVal_prob/*.npz` + `.pkl`) -- run that
-script first if they don't exist yet; this script never launches inference
-itself. Also reads `workspace/evaluation/runs/*/results_val.csv` (via
+Expected input: real val-set probabilities per shortlisted trainer, resolved
+by `predval_dir()` -- prefers `predVal_prob/` (written by
+`export_val_probabilities.sh`/its queue-script variants) but falls back to
+nnU-Net's own automatic `fold_0/validation/*.npz` if that's where the real
+probabilities actually are (e.g. standard-plans `nnUNetTrainerBaseline_
+500epochs`, which was never in `export_val_probabilities.sh`'s trainer list
+but already has real val-set probabilities from an earlier `--val --npz`
+validate-only pass -- see PROJECT_PLAN.md "Finalist-selection" entry).
+Trainer identifiers may include a plans suffix, `"trainer (PlansName)"`
+(matching `select_finalist_from_val.discover_runs`'s key format exactly),
+to address a non-default-plans run such as `nnUNetResEncUNetMPlans` -- run
+`export_val_probabilities.sh` first if neither location has `.npz` files yet
+for a given trainer; this script never launches inference itself. Also
+reads `workspace/evaluation/runs/*/results_val.csv` (via
 `select_finalist_from_val`'s loader) for the best single-model val scores
 to compare ensembles against, and `--gt-dir` (default
 `nnUNet_raw/Dataset002_ATLAS/labelsTr`) for ground truth.
@@ -36,7 +45,7 @@ masks with `evaluation/compute_metrics.py:evaluate_case`, identically to
 every other prediction in this project.
 
 Which combos are tried: by default, every pair among the shortlist (cheap:
-5 trainers -> 10 pairs) plus the full shortlist averaged together --
+4 trainers -> 6 pairs) plus the full shortlist averaged together --
 override with `--combos "A+B,C+D+E"` (trainer short names, '+'-joined,
 comma-separated) to target specific groups, e.g. ones flagged as
 complementary by the voxel-correlation output above.
@@ -72,27 +81,77 @@ NNUNET_PREPROCESSED = Path("/home/galia/ISLES2026/nnUNet_preprocessed")
 NNUNET_RESULTS = Path("/home/galia/ISLES2026/nnUNet_results")
 DATASET_NAME = "Dataset002_ATLAS"
 
+# Updated 2026-08-20 to match the finalist-selection/PCA redundancy analysis
+# (PROJECT_PLAN.md "Finalist-selection / ensembling-candidate analysis"): one
+# representative per distinct error-pattern cluster, not the earlier
+# pre-ResEncM 5. `(nnUNetResEncUNetMPlans)` uses the same key format
+# `select_finalist_from_val.discover_runs` produces.
 DEFAULT_TRAINERS = [
     "nnUNetTrainerWideAugBaseline_500epochs",
+    "nnUNetTrainerBaseline_500epochs (nnUNetResEncUNetMPlans)",
     "nnUNetTrainerFocalTversky_500epochs",
-    "nnUNetTrainerTverskyMild_500epochs",
     "nnUNetTrainerLesionAwareSamplingPow_500epochs_full",
-    "nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full",
 ]
 
+DEFAULT_PLANS = "nnUNetPlans"
 
-def predval_dir(trainer: str) -> Path:
-    return NNUNET_RESULTS / DATASET_NAME / f"{trainer}__nnUNetPlans__3d_fullres" / "fold_0" / "predVal_prob"
+
+def parse_trainer_key(key: str) -> tuple[str, str]:
+    """Split a `"trainer"` or `"trainer (PlansName)"` key -- the exact format
+    `select_finalist_from_val.discover_runs` produces -- into
+    (trainer_class_name, plans_identifier), so a trainer copy-pasted from
+    that script's printed output resolves to the right nnU-Net output folder
+    without hand-editing."""
+    if key.endswith(")") and " (" in key:
+        trainer, plans = key.rsplit(" (", 1)
+        return trainer, plans[:-1]
+    return key, DEFAULT_PLANS
+
+
+def predval_dir(key: str) -> Path:
+    """Resolve a trainer(+plans) key to its val-probability directory.
+
+    Prefers the manually-exported `predVal_prob/` (written by
+    `export_val_probabilities.sh`/its queue-script variants), but falls back
+    to nnU-Net's own automatic `fold_0/validation/` folder if that one has
+    the real per-case `.npz` probabilities instead -- concretely, standard-
+    plans `nnUNetTrainerBaseline_500epochs`, which was never in
+    `export_val_probabilities.sh`'s trainer list but already has real
+    val-set probabilities from an earlier `--val --npz` validate-only pass
+    (verified 2026-08-20: 120/120 cases, matching `splits_full/manifest.csv`
+    exactly, newer than `checkpoint_final.pth` -- not stale). Checking for
+    real `.npz` files (not just directory existence) also catches an
+    existing-but-empty `predVal_prob/` correctly rather than trusting it."""
+    trainer, plans = parse_trainer_key(key)
+    base = NNUNET_RESULTS / DATASET_NAME / f"{trainer}__{plans}__3d_fullres" / "fold_0"
+    exported = base / "predVal_prob"
+    if any(exported.glob("*.npz")):
+        return exported
+    fallback = base / "validation"
+    if any(fallback.glob("*.npz")):
+        return fallback
+    return exported  # neither has real data; check_predval_dirs reports this as missing
 
 
 def check_predval_dirs(trainers: list[str]) -> dict[str, Path]:
-    missing = [t for t in trainers if not predval_dir(t).exists()]
+    dirs = {}
+    missing = []
+    for t in trainers:
+        d = predval_dir(t)
+        if not any(d.glob("*.npz")):
+            missing.append(t)
+            continue
+        dirs[t] = d
+        source = "predVal_prob/ (manual export)" if d.name == "predVal_prob" \
+            else "validation/ (nnU-Net's automatic val pass, no predVal_prob/ export exists)"
+        print(f"  {t}: using {source} -> {d}")
     if missing:
         raise SystemExit(
-            "Missing predVal_prob/ for: " + ", ".join(missing) +
+            "Missing val-set probabilities (no .npz in either predVal_prob/ or validation/) for: "
+            + ", ".join(missing) +
             "\nRun ensembling/export_val_probabilities.sh for these trainers first."
         )
-    return {t: predval_dir(t) for t in trainers}
+    return dirs
 
 
 def voxel_probability_correlation(dirs: dict[str, Path], case_ids: list[str]) -> pd.DataFrame:
@@ -208,7 +267,12 @@ def main() -> None:
     ap.add_argument("--gt-dir", default=str(NNUNET_RAW / DATASET_NAME / "labelsTr"), type=Path)
     ap.add_argument("--out-dir", default="workspace/evaluation/finalist_selection", type=Path)
     ap.add_argument("--work-dir", default="workspace/evaluation/ensemble_tmp", type=Path)
-    ap.add_argument("--combos", default=None, help='e.g. "FocalTversky+TverskyMild,WideAugBaseline+FocalTversky"')
+    ap.add_argument("--combos", default=None, help='e.g. "FocalTversky+LesionAwareSamplingPow,WideAugBaseline+Baseline (ResEncM)"')
+    ap.add_argument("--correlation-only", action="store_true",
+                     help="Stop after the voxel-probability correlation heatmap -- skip ensemble "
+                          "scoring entirely. Selection (which trainers look complementary) should "
+                          "run over the full candidate set; use this to check correlation across "
+                          "all trainers without also scoring O(n^2) ensemble combos for that many.")
     ap.add_argument("--primary-metric", default="hd95_mm", choices=["dice", "hd95_mm", "lesion_f1"])
     ap.add_argument("--n-bootstrap", type=int, default=2000)
     ap.add_argument("--alpha", type=float, default=0.05)
@@ -233,6 +297,13 @@ def main() -> None:
     print(f"Wrote: {args.out_dir / 'voxel_probability_correlation.png'}")
     print(f"Lowest voxel-probability correlation pair (most complementary): "
           f"{off_diag.stack().idxmin()} = {off_diag.stack().min():.3f}")
+    print(f"Highest voxel-probability correlation pair (most redundant): "
+          f"{off_diag.stack().idxmax()} = {off_diag.stack().max():.3f}")
+
+    if args.correlation_only:
+        print(f"\n--correlation-only: stopping before ensemble scoring.")
+        print(f"Wrote: {args.out_dir / 'voxel_probability_correlation.csv'}")
+        return
 
     if args.combos:
         by_short = {short_name(t): t for t in args.trainers}

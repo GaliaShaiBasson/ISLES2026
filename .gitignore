@@ -16,6 +16,10 @@ isles26_project_simplified/workspace/postprocess_test/diceonly250_predTs_cc10
 isles26_project_simplified/workspace/sample_run/predTs_cc_test
 isles26_project_simplified/workspace/postprocess_grid
 isles26_project_simplified/workspace/smoketest_predVal_prob
+# ensemble_val.py's --work-dir: scratch ensembled masks, rewritten (rmtree'd
+# then recreated) every combo/run -- never a deliverable, unlike the CSVs/PNGs
+# in the sibling finalist_selection/ directory, which stay tracked.
+isles26_project_simplified/workspace/evaluation/ensemble_tmp
 
 # --- isles26_project (new, reorganized project root) ---
 # Same specific ignores as isles26_project_simplified above, updated for the
@@ -29,6 +33,10 @@ isles26_project/workspace/sample_run/predTs_cc_test
 isles26_project/workspace/predictions/postprocess_grid
 isles26_project/workspace/predictions/val_images_staged
 isles26_project/workspace/predictions/smoketest_predVal_prob
+# ensemble_val.py's --work-dir: scratch ensembled masks, rewritten (rmtree'd
+# then recreated) every combo/run -- never a deliverable, unlike the CSVs/PNGs
+# in the sibling finalist_selection/ directory, which stay tracked.
+isles26_project/workspace/results/ensemble_tmp
 
 # Hidden final-holdout test set (id + ood) -- this project's stand-in for the
 # real, never-received ISLES'26 challenge test set. Must never be committed or
@@ -44,6 +52,8 @@ summary_by_size_bin.csv
 case_metadata.csv
 figures/
 isles26_project_simplified/workspace/val_images_staged
+isles26_project_simplified/workspace/val_images_staged_smoketest
+isles26_project_simplified/workspace/*.log
 
 # Python
 __pycache__/
