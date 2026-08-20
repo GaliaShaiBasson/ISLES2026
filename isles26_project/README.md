@@ -45,7 +45,7 @@ Generate the train/val/test_id/test_ood split first (replaces nnU-Net's
 default unstratified 5-fold CV — see `CLAUDE.md` for why):
 
 ```bash
-python data_prep/split_dataset.py --raw-root "/path/to/ATLAS_R3.0_raw" --out-dir workspace/splits_dataset001
+python data_prep/split_dataset.py --raw-root "/path/to/ATLAS_R3.0_raw" --out-dir workspace/splits_dataset002
 ```
 
 Do not proceed past this step until `broken_cases.csv` is small/stable.
@@ -119,8 +119,11 @@ The custom trainers are discovered through nnU-Net's `nnUNet_extTrainer` mechani
 ```text
 isles26.py                         umbrella CLI -- wires the stage scripts below
                                     under one `python isles26.py <command>` entry point
-core.py                            shared env/.env loading + run-identity fingerprinting,
+core.py                            shared env/.env loading + subprocess helpers,
                                     imported by every stage script below
+run_identity.py                    run-identity fingerprinting (collision-safe
+                                    checkpoint/result namespacing), imported only by
+                                    train_cli.py/evaluate_cli.py
 setup_cli.py                       stage: init, doctor
 data_prep_cli.py                   stage: prepare, preprocess
 train_cli.py                       stage: train

@@ -114,6 +114,21 @@ Newest first. Each entry: decision, rationale, where it's implemented.
   the process (previously both silently defaulted to the same
   `workspace/splits` regardless of `--dataset-id`, a gap the old single
   name papered over).
+- **Follow-up (same day): `core.py` itself split into `core.py` +
+  `run_identity.py`.** `core.py` initially held both generic env/subprocess
+  infra *and* the run-identity fingerprinting system together, just because
+  both were "shared" -- but checking actual imports showed
+  `setup_cli.py`/`data_prep_cli.py` only ever use the generic half, never
+  fingerprinting (`compute_run_fingerprint`, `run_id_from_fingerprint`,
+  `_guard_run_fingerprint`, `SAMPLING_METADATA_BY_TRAINER`,
+  `_output_folder`, `_find_latest_checkpoint`/`_find_existing_checkpoint`),
+  which only `train_cli.py`/`evaluate_cli.py` need. Moved the fingerprinting
+  cluster to a new `run_identity.py`, imported only by those two. Makes the
+  usage boundary structural (those two stages have no import path to it)
+  rather than a comment inside a shared file that's easy to silently cross
+  later. Verified: reran the exact resenc-M+sampling `train`/`evaluate`
+  commands (both via `isles26.py` and standalone `train_cli.py`/
+  `evaluate_cli.py`) and confirmed byte-identical output before/after.
 - **Real bugs found and fixed while verifying the reorg, not just
   mechanical renames:**
   - `ensembling/ensemble_val.py` did `sys.path.insert(...,

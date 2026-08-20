@@ -27,14 +27,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from core import (
+from core import build_environment, config_value, ensure_workspace, run_cli, run_command
+from run_identity import (
     SAMPLING_METADATA_BY_TRAINER,
-    build_environment,
     compute_run_fingerprint,
-    config_value,
-    ensure_workspace,
-    run_cli,
-    run_command,
     run_id_from_fingerprint,
     _find_existing_checkpoint,
     _find_latest_checkpoint,

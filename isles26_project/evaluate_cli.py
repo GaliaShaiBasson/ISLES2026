@@ -39,15 +39,13 @@ from pathlib import Path
 from core import (
     PROJECT_ROOT,
     build_environment,
-    compute_run_fingerprint,
     config_value,
     dataset_folder,
     ensure_workspace,
     run_cli,
     run_command,
-    run_id_from_fingerprint,
-    _output_folder,
 )
+from run_identity import compute_run_fingerprint, run_id_from_fingerprint, _output_folder
 
 
 def _git_commit() -> str | None:
