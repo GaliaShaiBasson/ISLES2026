@@ -1,27 +1,39 @@
 #!/usr/bin/env python3
 """Score real softmax-averaged ensemble candidates on val -- not a proxy
-(the per-case-Dice correlation/PCA in analysis/), the actual averaged
-prediction, evaluated the same way every single model was.
+(the per-case-Dice correlation/PCA, or the voxel-probability-correlation/PCA
+in `analysis/finalist_selection/`), the actual averaged prediction, evaluated
+the same way every single model was.
 
-Expected input: `predVal_prob/` directories written by
-`export_val_probabilities.sh` under each shortlisted trainer's normal
-nnU-Net results path (`.../fold_0/predVal_prob/*.npz` + `.pkl`) -- run that
-script first if they don't exist yet; this script never launches inference
-itself. Also reads `workspace/results/runs/*/results_val.csv` (via
+This script only builds and scores real ensembles -- it has no correlation
+computation and no plotting code. Selecting *which* trainers to combo over
+in the first place is `analysis/finalist_selection/voxel_probability_
+correlation.py` + `pca_probability_redundancy.py`'s job (read-only, over the
+full candidate set); this script is the next, deliberate step: given a
+chosen combo, actually build it and score it for real. Kept separate on
+purpose -- this script does real, sometimes slow CPU work (softmax
+averaging + affine-aware resampling + metric computation) that `analysis/`
+scripts by convention never do.
+
+Expected input: real val-set probabilities per shortlisted trainer, resolved
+by `predval_dirs.check_predval_dirs()` -- prefers `predVal_prob/` (written by
+`export_val_probabilities.sh`/its queue-script variants) but falls back to
+nnU-Net's own automatic `fold_0/validation/*.npz` if that's where the real
+probabilities actually are (e.g. standard-plans `nnUNetTrainerBaseline_
+500epochs`, which was never in `export_val_probabilities.sh`'s trainer list
+but already has real val-set probabilities from an earlier `--val --npz`
+validate-only pass -- see PROJECT_PLAN.md "Finalist-selection" entry).
+Trainer identifiers may include a plans suffix, `"trainer (PlansName)"`
+(matching `select_finalist_from_val.discover_runs`'s key format exactly),
+to address a non-default-plans run such as `nnUNetResEncUNetMPlans` -- run
+`export_val_probabilities.sh` first if neither location has `.npz` files yet
+for a given trainer; this script never launches inference itself. Also
+reads `workspace/results/runs/*/results_val.csv` (via
 `select_finalist_from_val`'s loader) for the best single-model val scores
 to compare ensembles against, and `--gt-dir` (default
 `nnUNet_raw/Dataset002_ATLAS/labelsTr`) for ground truth.
 
 What it produces (under `--out-dir`, default
 `workspace/results/finalist_selection/`):
-- `voxel_probability_correlation.png`/`.csv` -- per-voxel Pearson r of the
-  foreground-probability channel between every pair of shortlisted
-  trainers, averaged over the shared val cases. A finer-grained
-  complement to the per-case Dice correlation already computed in
-  `analysis/plot_finalist_selection.py`: two trainers can land the same
-  Dice on a case while disagreeing heavily on which voxels they're unsure
-  about, which is exactly the disagreement ensembling exploits and a
-  case-level Dice correlation can't see.
 - `ensemble_summary_val.csv` -- one row per evaluated ensemble combo
   (mean Dice/HD95/lesion-F1 + paired-bootstrap comparison against the
   best single model on the same val cases) -- the real ensemble-vs-single
@@ -36,10 +48,18 @@ masks with `evaluation/compute_metrics.py:evaluate_case`, identically to
 every other prediction in this project.
 
 Which combos are tried: by default, every pair among the shortlist (cheap:
-5 trainers -> 10 pairs) plus the full shortlist averaged together --
+4 trainers -> 6 pairs) plus the full shortlist averaged together --
 override with `--combos "A+B,C+D+E"` (trainer short names, '+'-joined,
 comma-separated) to target specific groups, e.g. ones flagged as
-complementary by the voxel-correlation output above.
+complementary by `analysis/finalist_selection/voxel_probability_
+correlation.py`'s output. That selection script should run over the full
+candidate set, not this one -- scoring O(n^2) real ensemble combos for many
+trainers is exactly the expensive step worth avoiding until the candidate
+list is already narrowed by correlation/PCA.
+
+Once a combo is chosen here, see `ensembling/ensemble_test.py` for the
+one-time, deliberate held-out (test_id/test_ood) scoring step -- this
+script only ever touches val.
 
 Usage:
     python ensembling/ensemble_val.py
@@ -53,107 +73,43 @@ import sys
 from itertools import combinations
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.stats import pearsonr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "analysis" / "finalist_selection"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "evaluation"))
 from select_finalist_from_val import discover_runs, load_all, check_paired  # noqa: E402
-from plot_finalist_selection import short_name, trainer_colors, BLUE_SEQUENTIAL  # noqa: E402
+from plot_finalist_selection import short_name  # noqa: E402
+from predval_dirs import check_predval_dirs  # noqa: E402
 from compute_metrics import evaluate_case  # noqa: E402
 
 from nnunetv2.ensembling.ensemble import ensemble_folders  # noqa: E402
-from matplotlib.colors import LinearSegmentedColormap
 
 NNUNET_RAW = Path("/home/galia/ISLES2026/nnUNet_raw")
 NNUNET_PREPROCESSED = Path("/home/galia/ISLES2026/nnUNet_preprocessed")
-NNUNET_RESULTS = Path("/home/galia/ISLES2026/nnUNet_results")
 DATASET_NAME = "Dataset002_ATLAS"
 
+# Updated 2026-08-20 to match the finalist-selection/PCA redundancy analysis
+# (PROJECT_PLAN.md "Finalist-selection / ensembling-candidate analysis"): one
+# representative per distinct error-pattern cluster, not the earlier
+# pre-ResEncM 5. `(nnUNetResEncUNetMPlans)` uses the same key format
+# `select_finalist_from_val.discover_runs` produces.
+#
+# Re-derived same day after the primary metric switched hd95_mm -> dice (see
+# CLAUDE.md "Primary metric switched to Dice"): the redundancy clusters'
+# "best-ranked in cluster" pick flips in BOTH clusters under dice --
+# WideAugBaseline (ResEncM) now beats Baseline (ResEncM) (was the reverse
+# under hd95_mm), and Baseline now beats WideAugBaseline in the standard-plans
+# cluster (also reversed). The 4th slot also flips: LesionAwareSamplingPow-
+# Curriculum (dice 0.6173) now ranks above LesionAwareSamplingPow (dice
+# 0.6127) -- consistent with the voxel-probability-correlation finding that
+# Curriculum was already the more complementary of the two (see PROJECT_PLAN.md).
 DEFAULT_TRAINERS = [
-    "nnUNetTrainerWideAugBaseline_500epochs",
+    "nnUNetTrainerBaseline_500epochs",
+    "nnUNetTrainerWideAugBaseline_500epochs (nnUNetResEncUNetMPlans)",
     "nnUNetTrainerFocalTversky_500epochs",
-    "nnUNetTrainerTverskyMild_500epochs",
-    "nnUNetTrainerLesionAwareSamplingPow_500epochs_full",
     "nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full",
 ]
-
-
-def predval_dir(trainer: str) -> Path:
-    return NNUNET_RESULTS / DATASET_NAME / f"{trainer}__nnUNetPlans__3d_fullres" / "fold_0" / "predVal_prob"
-
-
-def check_predval_dirs(trainers: list[str]) -> dict[str, Path]:
-    missing = [t for t in trainers if not predval_dir(t).exists()]
-    if missing:
-        raise SystemExit(
-            "Missing predVal_prob/ for: " + ", ".join(missing) +
-            "\nRun ensembling/export_val_probabilities.sh for these trainers first."
-        )
-    return {t: predval_dir(t) for t in trainers}
-
-
-def voxel_probability_correlation(dirs: dict[str, Path], case_ids: list[str]) -> pd.DataFrame:
-    trainers = list(dirs)
-    sums = {(a, b): [] for a, b in combinations(trainers, 2)}
-    for case_id in case_ids:
-        arrays = {}
-        shape = None
-        for t in trainers:
-            npz_path = dirs[t] / f"{case_id}.npz"
-            if not npz_path.exists():
-                break
-            arr = np.load(npz_path)["probabilities"][1]  # foreground channel
-            if shape is None:
-                shape = arr.shape
-            elif arr.shape != shape:
-                raise SystemExit(
-                    f"{case_id}: probability shape mismatch between trainers "
-                    f"({t} has {arr.shape}, expected {shape}) -- refusing to correlate "
-                    "mismatched grids rather than silently reshaping."
-                )
-            arrays[t] = arr.ravel()
-        if len(arrays) != len(trainers):
-            continue  # case missing for some trainer, skip rather than guess
-        for a, b in combinations(trainers, 2):
-            r, _ = pearsonr(arrays[a], arrays[b])
-            sums[(a, b)].append(r)
-
-    trainers_sorted = trainers
-    corr = pd.DataFrame(np.eye(len(trainers_sorted)), index=trainers_sorted, columns=trainers_sorted)
-    for (a, b), vals in sums.items():
-        mean_r = float(np.mean(vals)) if vals else np.nan
-        corr.loc[a, b] = mean_r
-        corr.loc[b, a] = mean_r
-    return corr
-
-
-def plot_voxel_correlation(corr: pd.DataFrame, out_dir: Path) -> None:
-    labels = [short_name(t) for t in corr.columns]
-    vmin = max(0.0, float(np.nanmin(corr.values[~np.eye(len(corr), dtype=bool)])) - 0.05)
-    cmap = LinearSegmentedColormap.from_list("blue_seq", BLUE_SEQUENTIAL)
-
-    fig, ax = plt.subplots(figsize=(0.75 * len(labels) + 2, 0.75 * len(labels) + 2))
-    im = ax.imshow(corr.values, cmap=cmap, vmin=vmin, vmax=1.0)
-    ax.set_xticks(range(len(labels)))
-    ax.set_yticks(range(len(labels)))
-    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=8)
-    ax.set_yticklabels(labels, fontsize=8)
-    for i in range(len(labels)):
-        for j in range(len(labels)):
-            val = corr.values[i, j]
-            text_color = "#ffffff" if val > (vmin + 1.0) / 2 else "#0b0b0b"
-            ax.text(j, i, f"{val:.2f}" if not np.isnan(val) else "n/a", ha="center", va="center",
-                    fontsize=7, color=text_color)
-    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label("Pearson r, per-voxel foreground probability")
-    ax.set_title("Per-voxel probability correlation between trainers (val)\nlower = more complementary confidence, finer than the per-case Dice view", fontsize=10)
-    fig.tight_layout()
-    fig.savefig(out_dir / "voxel_probability_correlation.png", dpi=180)
-    plt.close(fig)
-    corr.to_csv(out_dir / "voxel_probability_correlation.csv")
 
 
 def default_combos(trainers: list[str]) -> list[tuple[str, ...]]:
@@ -162,7 +118,14 @@ def default_combos(trainers: list[str]) -> list[tuple[str, ...]]:
     return combos
 
 
-def score_combo(dirs: dict[str, Path], combo: tuple[str, ...], gt_dir: Path, work_dir: Path) -> pd.DataFrame:
+def build_ensemble(dirs: dict[str, Path], combo: tuple[str, ...], work_dir: Path) -> Path:
+    """Softmax-average `combo`'s probability folders into `work_dir/<label>/`
+    via nnU-Net's own `ensemble_folders` (real ensembling, no scoring) --
+    factored out of `score_combo` so `ensembling/ensemble_test.py` can reuse
+    the exact same ensembling step but score the result with
+    `evaluation/compute_metrics.py`'s CLI (manifest-merged columns: split,
+    center, size_bin) instead of `score_combo`'s bare per-case loop, which
+    only needs the raw metrics for the paired-bootstrap-vs-top comparison."""
     input_folders = [str(dirs[t]) for t in combo]
     out_folder = work_dir / ("+".join(short_name(t) for t in combo))
     if out_folder.exists():
@@ -173,15 +136,34 @@ def score_combo(dirs: dict[str, Path], combo: tuple[str, ...], gt_dir: Path, wor
         input_folders, str(out_folder), save_merged_probabilities=False,
         dataset_json_file_or_dict=str(dataset_json), plans_json_file_or_dict=str(plans_json),
     )
+    return out_folder
+
+
+def score_combo(dirs: dict[str, Path], combo: tuple[str, ...], gt_dir: Path, work_dir: Path) -> pd.DataFrame:
+    out_folder = build_ensemble(dirs, combo, work_dir)
     rows = []
+    failed = 0
     for pred_path in sorted(out_folder.glob("*.nii.gz")):
         case_id = pred_path.stem.replace(".nii", "")
         gt_path = gt_dir / f"{case_id}.nii.gz"
         if not gt_path.exists():
             continue
-        metrics = evaluate_case(pred_path, gt_path)
+        try:
+            metrics = evaluate_case(pred_path, gt_path)
+        except Exception as exc:
+            # Same per-case error handling as evaluation/compute_metrics.py's own CLI --
+            # a real geometry mismatch on one case (e.g. ensembling voxel-grids that
+            # don't resample back identically) shouldn't crash scoring for every other
+            # case in the combo. Verified against a real case: 2026-08-20,
+            # WideAugBaseline+Baseline(ResEncM) crashed the whole run on exactly this
+            # exception before this fix existed.
+            print(f"  [error] {case_id}: {exc}")
+            failed += 1
+            continue
         metrics["case_id"] = case_id
         rows.append(metrics)
+    if failed:
+        print(f"  [warn] {failed} case(s) failed evaluation for this combo (see [error] lines above) -- excluded, not crashed on.")
     return pd.DataFrame(rows)
 
 
@@ -194,8 +176,14 @@ def paired_bootstrap_vs_top(ensemble_scores: pd.Series, top_scores: pd.Series, n
     significant = (ci_low > 0) or (ci_high < 0)
     mean_diff = diffs.mean()
     better = (mean_diff < 0) if lower_better else (mean_diff > 0)
+    # Standard two-sided bootstrap p-value: the fraction of resampled means on
+    # the "wrong" side of zero, doubled (two-sided) and capped at 1.0 -- direction-
+    # agnostic (doesn't need lower_better), consistent with `significant` above
+    # (which is also just "does the 95% CI exclude zero", regardless of direction).
+    p_value = min(1.0, 2 * min((boot_means <= 0).mean(), (boot_means >= 0).mean()))
     return {
         "mean_diff_vs_top_single": mean_diff, "ci_low": ci_low, "ci_high": ci_high,
+        "p_value": p_value,
         "significant": significant, "ensemble_better_than_top_single": bool(significant and better),
         "n_paired_cases": len(diffs),
     }
@@ -208,8 +196,8 @@ def main() -> None:
     ap.add_argument("--gt-dir", default=str(NNUNET_RAW / DATASET_NAME / "labelsTr"), type=Path)
     ap.add_argument("--out-dir", default="workspace/results/finalist_selection", type=Path)
     ap.add_argument("--work-dir", default="workspace/results/ensemble_tmp", type=Path)
-    ap.add_argument("--combos", default=None, help='e.g. "FocalTversky+TverskyMild,WideAugBaseline+FocalTversky"')
-    ap.add_argument("--primary-metric", default="hd95_mm", choices=["dice", "hd95_mm", "lesion_f1"])
+    ap.add_argument("--combos", default=None, help='e.g. "FocalTversky+LesionAwareSamplingPow,WideAugBaseline+Baseline (ResEncM)"')
+    ap.add_argument("--primary-metric", default="dice", choices=["dice", "hd95_mm", "lesion_f1"])
     ap.add_argument("--n-bootstrap", type=int, default=2000)
     ap.add_argument("--alpha", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=0)
@@ -225,14 +213,6 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     args.work_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"Computing per-voxel probability correlation over {len(case_ids)} shared val cases...")
-    corr = voxel_probability_correlation(dirs, case_ids)
-    plot_voxel_correlation(corr, args.out_dir)
-    off_diag = corr.where(~np.eye(len(corr), dtype=bool))
-    print(f"Wrote: {args.out_dir / 'voxel_probability_correlation.png'}")
-    print(f"Lowest voxel-probability correlation pair (most complementary): "
-          f"{off_diag.stack().idxmin()} = {off_diag.stack().min():.3f}")
 
     if args.combos:
         by_short = {short_name(t): t for t in args.trainers}
@@ -277,7 +257,6 @@ def main() -> None:
               "-- the single model may be the simpler, equally-good choice.")
 
     print(f"\nWrote: {args.out_dir / 'ensemble_summary_val.csv'}")
-    print(f"Wrote: {args.out_dir / 'voxel_probability_correlation.csv'}")
 
 
 if __name__ == "__main__":

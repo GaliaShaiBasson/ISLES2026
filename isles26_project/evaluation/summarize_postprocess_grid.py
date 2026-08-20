@@ -15,13 +15,20 @@ What it produces (under `--out-root`):
 - `selected_combo.json` -- the auto-selected winner + the selection rule used,
   for `run_postprocess_grid.sh`'s phase 2 (or a caller's own use) to read back.
 
-Selection rule (default, matches the original baseline-500 grid's precedent):
-lowest val `hd95_mean`, `dice_mean` as tiebreaker -- HD95 is the metric small
-spurious components distort most (see CLAUDE.md), so it's the most informative
-single criterion for connected-component filtering specifically. Override via
-`--selection-metric`/`--tiebreak-metric` if a different rule is deliberately
-wanted for a given call -- not silently, since changing this changes what
-"winner" means.
+Selection rule (default): highest val `dice_mean`, `hd95_mean` as tiebreaker --
+switched from hd95_mean-primary on 2026-08-20 to match the project-wide
+primary-metric switch (see CLAUDE.md "Primary metric switched to Dice"
+entry). The original hd95_mean-primary rule had a real, specific rationale
+worth keeping in mind even though it's no longer the default: HD95 is the
+metric small spurious components distort most, so it's arguably the most
+sensitive single criterion for *detecting* whether connected-component
+filtering does anything -- the original baseline-500 grid's "no-op wins"
+conclusion was reached under that rule, and should be re-checked under
+dice-primary selection, not assumed to carry over (dice moved by ≤0.0004
+across all 20 combos in that run, so the two rules likely agree, but this
+needs confirming, not assuming). Override via `--selection-metric`/
+`--tiebreak-metric` if a different rule is deliberately wanted for a given
+call -- not silently, since changing this changes what "winner" means.
 
 Usage:
     python evaluation/summarize_postprocess_grid.py --val-root workspace/predictions/postprocess_grid/wideaug500/val_search --out-root workspace/predictions/postprocess_grid/wideaug500
@@ -40,9 +47,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--val-root", required=True, type=Path)
     ap.add_argument("--out-root", required=True, type=Path)
-    ap.add_argument("--selection-metric", default="hd95_mean")
-    ap.add_argument("--selection-lower-is-better", action="store_true", default=True)
-    ap.add_argument("--tiebreak-metric", default="dice_mean")
+    ap.add_argument("--selection-metric", default="dice_mean")
+    ap.add_argument("--selection-lower-is-better", action="store_true", default=False)
+    ap.add_argument("--tiebreak-metric", default="hd95_mean")
     args = ap.parse_args()
 
     rows = []

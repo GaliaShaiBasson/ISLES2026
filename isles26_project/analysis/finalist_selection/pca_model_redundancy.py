@@ -82,7 +82,10 @@ def build_trainer_case_matrix(df: pd.DataFrame) -> pd.DataFrame:
     return pivot.T  # trainer x case
 
 
-def plot_scree(pca: PCA, out_dir: Path) -> None:
+def plot_scree(
+    pca: PCA, out_dir: Path,
+    title: str = "How many independent axes of per-case behavior exist among the trainers?",
+) -> None:
     ratios = pca.explained_variance_ratio_ * 100
     cumulative = np.cumsum(ratios)
     x = np.arange(1, len(ratios) + 1)
@@ -96,7 +99,7 @@ def plot_scree(pca: PCA, out_dir: Path) -> None:
     ax.set_ylim(0, 105)
     ax.axhline(90, color="#52514e", linestyle="--", linewidth=1, alpha=0.6)
     ax.text(x[-1], 91, "90%", fontsize=8, color="#52514e", ha="right")
-    ax.set_title("How many independent axes of per-case behavior exist among the trainers?")
+    ax.set_title(title)
     ax.legend(frameon=False, fontsize=9)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -105,7 +108,10 @@ def plot_scree(pca: PCA, out_dir: Path) -> None:
     plt.close(fig)
 
 
-def plot_scatter(scores: np.ndarray, trainers: list[str], pca: PCA, colors: dict[str, str], out_dir: Path) -> None:
+def plot_scatter(
+    scores: np.ndarray, trainers: list[str], pca: PCA, colors: dict[str, str], out_dir: Path,
+    title: str = "Trainers embedded by per-case Dice deviation pattern",
+) -> None:
     fig, ax = plt.subplots(figsize=(7, 6.5))
     pc1_pct = pca.explained_variance_ratio_[0] * 100
     pc2_pct = pca.explained_variance_ratio_[1] * 100 if scores.shape[1] > 1 else 0.0
@@ -118,7 +124,7 @@ def plot_scatter(scores: np.ndarray, trainers: list[str], pca: PCA, colors: dict
     ax.axvline(0, color="#c3c2b7", linewidth=1, zorder=1)
     ax.set_xlabel(f"PC1 ({pc1_pct:.1f}% of variance)")
     ax.set_ylabel(f"PC2 ({pc2_pct:.1f}% of variance)")
-    ax.set_title("Trainers embedded by per-case Dice deviation pattern\n(close together = redundant, far apart = complementary errors)")
+    ax.set_title(f"{title}\n(close together = redundant, far apart = complementary errors)")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     fig.tight_layout()
@@ -197,7 +203,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--runs-dir", default="workspace/results/runs", type=Path)
     ap.add_argument("--out-dir", default="workspace/figures/finalist_selection", type=Path)
-    ap.add_argument("--primary-metric", default="hd95_mm")
+    ap.add_argument("--primary-metric", default="dice")
     ap.add_argument("--redundancy-corr-threshold", type=float, default=0.95,
                      help="Trainers whose per-case Dice correlation exceeds this are clustered as redundant.")
     ap.add_argument("--trainer-filter", default=None)

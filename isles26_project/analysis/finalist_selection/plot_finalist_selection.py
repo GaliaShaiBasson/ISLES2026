@@ -270,7 +270,7 @@ def main() -> None:
     ap.add_argument("--selection-dir", default="workspace/results/finalist_selection", type=Path,
                      help="Where select_finalist_from_val.py wrote pairwise_vs_top_val.csv.")
     ap.add_argument("--out-dir", default="workspace/figures/finalist_selection", type=Path)
-    ap.add_argument("--primary-metric", default="hd95_mm", choices=list(SUMMARY_PREFIX))
+    ap.add_argument("--primary-metric", default="dice", choices=list(SUMMARY_PREFIX))
     ap.add_argument("--trainer-filter", default=None)
     args = ap.parse_args()
 

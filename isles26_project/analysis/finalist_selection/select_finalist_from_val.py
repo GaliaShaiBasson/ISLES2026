@@ -25,13 +25,14 @@ What it produces (under `--out-dir`, default
 - Printed ranked table + a plain-language flag for whether the "winner" is
   statistically distinguishable from the runner-up, or a near-tie.
 
-Non-obvious rationale: default primary selection rule is lowest mean
-hd95_mm, dice as tiebreaker -- deliberately matching the convention already
-used by `postprocess_predictions.py`'s grid search (see PROJECT_PLAN.md /
-CLAUDE.md), so model selection and post-processing selection apply the same
-rule rather than silently picking whichever metric favors a preferred
-model. Override with `--primary-metric dice` if a different rule is
-intended for a given call. This script deliberately never reads
+Non-obvious rationale: default primary selection rule is highest mean dice,
+hd95_mm as tiebreaker (switched from hd95_mm-primary on 2026-08-20 -- see
+CLAUDE.md "Primary metric switched to Dice" entry: Dice is always defined
+(HD95 is NaN whenever prediction or ground truth is empty -- see
+`hd95_n_nan`), lower-variance across a val set this size, and the
+metric every comparable segmentation report leads with). Override with
+`--primary-metric hd95_mm` if a different rule is intended for a given
+call. This script deliberately never reads
 `results_test.csv` -- val is for choosing among conditions; test_id/
 test_ood/final_holdout must stay untouched by this step (see CLAUDE.md
 "Split finalized" and the finalist-selection discussion in project chat).
@@ -56,8 +57,12 @@ LOWER_IS_BETTER = {"hd95_mm"}
 SUMMARY_PREFIX = {"dice": "dice", "hd95_mm": "hd95", "lesion_f1": "lesion_f1"}
 
 
-def discover_runs(runs_dir: Path) -> dict[str, Path]:
-    """Map a human-readable trainer name -> its results_val.csv path.
+def discover_runs(runs_dir: Path, filename: str = "results_val.csv") -> dict[str, Path]:
+    """Map a human-readable trainer name -> its `filename` path (default
+    `results_val.csv`; pass `filename="results_test.csv"` to discover
+    already-scored held-out results instead -- e.g. `ensembling/
+    ensemble_test.py` reuses this to read existing single-model test_id/
+    test_ood scores for comparison, without recomputing them).
 
     Keyed by trainer name *and* plans identifier, not trainer name alone --
     two runs can share a trainer class (e.g. `nnUNetTrainerBaseline_500epochs`
@@ -68,7 +73,7 @@ def discover_runs(runs_dir: Path) -> dict[str, Path]:
     `(plans_name)` suffix; the default (`plans` missing/None/"nnUNetPlans")
     keeps the plain trainer name so existing output/CSVs stay unchanged."""
     out = {}
-    for csv_path in sorted(runs_dir.glob("*/results_val.csv")):
+    for csv_path in sorted(runs_dir.glob(f"*/{filename}")):
         run_dir = csv_path.parent
         manifest_path = run_dir / "run_manifest.json"
         name = run_dir.name
@@ -197,7 +202,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--runs-dir", default="workspace/results/runs", type=Path)
     ap.add_argument("--out-dir", default="workspace/results/finalist_selection", type=Path)
-    ap.add_argument("--primary-metric", default="hd95_mm", choices=METRICS)
+    ap.add_argument("--primary-metric", default="dice", choices=METRICS)
     ap.add_argument("--top-n", type=int, default=3, help="How many finalists to flag for the next (test_id/ood) stage.")
     ap.add_argument("--n-bootstrap", type=int, default=2000)
     ap.add_argument("--alpha", type=float, default=0.05)
