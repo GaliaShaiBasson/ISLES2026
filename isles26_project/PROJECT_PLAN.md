@@ -5,6 +5,12 @@ report is due. See `README.md` for setup and the exact CLI commands, and
 `CLAUDE.md` for *why* each deviation from nnU-Net/project defaults was made
 and for the full decisions log.
 
+**This directory (`isles26_project/`) is now the active project (2026-08-20
+onward)**, per the reorganization described in `CLAUDE.md`'s "Repo structure
+reorg" entry. `isles26_project_simplified/` is being phased out and will
+likely move to `archive/` once nothing else needs it -- new work happens
+here, not there.
+
 ## Phase order and controlled-comparison rules
 
 Split → prepare → preprocess → debug smoke test → baseline → loss study →
@@ -398,6 +404,15 @@ finalizing which trainers actually go into the shipped ensemble.
 
 ## Future work (beyond this report)
 
+- **Rerun the connected-component post-processing grid search under
+  `--selection-metric dice_mean`** (planned 2026-08-21) — the project's
+  primary metric switched from hd95_mm to Dice on 2026-08-20 (see
+  `CLAUDE.md` "Primary metric switched to Dice"); the original grid's
+  "no-op wins" conclusion was reached under hd95_mean-primary selection
+  specifically. The original numbers (dice moved ≤0.0004 across all 20
+  combos) suggest the conclusion likely still holds, but this needs an
+  actual rerun to confirm, not an assumption. Same val set as before
+  (`fold_0/validation/` vs. `labelsTr`) — never test_id/test_ood.
 - **Per-condition threshold tuning** (0.5 → best-found, via
   `dice_vs_threshold.py`) and probability-calibration inspection (via
   `probability_histogram.py`) across all 7 conditions, now that
