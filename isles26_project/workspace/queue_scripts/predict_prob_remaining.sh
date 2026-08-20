@@ -7,7 +7,7 @@
 # same GPU-bound reasoning applies here).
 set -uo pipefail
 
-export nnUNet_extTrainer=/home/galia/ISLES2026/isles26_project_simplified
+export nnUNet_extTrainer=/home/galia/ISLES2026/isles26_project
 export nnUNet_raw=/home/galia/ISLES2026/nnUNet_raw
 export nnUNet_preprocessed=/home/galia/ISLES2026/nnUNet_preprocessed
 export nnUNet_results=/home/galia/ISLES2026/nnUNet_results

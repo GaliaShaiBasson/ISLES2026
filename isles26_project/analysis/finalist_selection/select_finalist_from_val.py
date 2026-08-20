@@ -2,7 +2,7 @@
 """Rank trained conditions on val ONLY, to pick a short finalist list before
 anything touches test_id/test_ood or final_holdout.
 
-Expected input layout: `workspace/evaluation/runs/<run_id>/results_val.csv`
+Expected input layout: `workspace/results/runs/<run_id>/results_val.csv`
 (one row per val case, written by `isles26.py evaluate --split val`), each
 with at least `case_id, dice, hd95_mm, lesion_f1, size_bin`. `run_manifest.json`
 in the same directory supplies the human-readable trainer name. Auto-discovers
@@ -11,7 +11,7 @@ script unmodified as new conditions (e.g. tonight's `curriculum`/`resencm`
 runs) finish; nothing here is hardcoded to today's 7 trainers.
 
 What it produces (under `--out-dir`, default
-`workspace/evaluation/finalist_selection/`):
+`workspace/results/finalist_selection/`):
 - `summary_val.csv` -- one row per trainer: n cases, mean/std/median for
   dice, hd95_mm, lesion_f1, ranked by the primary selection rule.
 - `summary_by_size_bin_val.csv` -- same, faceted by small/medium/large.
@@ -178,8 +178,8 @@ def paired_bootstrap(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--runs-dir", default="workspace/evaluation/runs", type=Path)
-    ap.add_argument("--out-dir", default="workspace/evaluation/finalist_selection", type=Path)
+    ap.add_argument("--runs-dir", default="workspace/results/runs", type=Path)
+    ap.add_argument("--out-dir", default="workspace/results/finalist_selection", type=Path)
     ap.add_argument("--primary-metric", default="hd95_mm", choices=METRICS)
     ap.add_argument("--top-n", type=int, default=3, help="How many finalists to flag for the next (test_id/ood) stage.")
     ap.add_argument("--n-bootstrap", type=int, default=2000)

@@ -11,9 +11,24 @@ archive/
 ATLAS*/
 data/project_debug_data
 archived_datasets
+backups/
 isles26_project_simplified/workspace/postprocess_test/diceonly250_predTs_cc10
 isles26_project_simplified/workspace/sample_run/predTs_cc_test
 isles26_project_simplified/workspace/postprocess_grid
+isles26_project_simplified/workspace/smoketest_predVal_prob
+
+# --- isles26_project (new, reorganized project root) ---
+# Same specific ignores as isles26_project_simplified above, updated for the
+# new layout: postprocess_test/, postprocess_grid/, and val_images_staged
+# moved under workspace/predictions/; sample_run/ is unchanged. Keep both
+# this section and the isles26_project_simplified one above until the
+# switchover (see REPO_STRUCTURE_PLAN.md) is complete and the old dir is
+# retired.
+isles26_project/workspace/predictions/postprocess_test/diceonly250_predTs_cc10
+isles26_project/workspace/sample_run/predTs_cc_test
+isles26_project/workspace/predictions/postprocess_grid
+isles26_project/workspace/predictions/val_images_staged
+isles26_project/workspace/predictions/smoketest_predVal_prob
 
 # Hidden final-holdout test set (id + ood) -- this project's stand-in for the
 # real, never-received ISLES'26 challenge test set. Must never be committed or
@@ -28,6 +43,7 @@ summary_by_experiment.csv
 summary_by_size_bin.csv
 case_metadata.csv
 figures/
+isles26_project_simplified/workspace/val_images_staged
 
 # Python
 __pycache__/

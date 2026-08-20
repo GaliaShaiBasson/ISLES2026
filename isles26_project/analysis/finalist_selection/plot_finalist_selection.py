@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Decision-support figures for picking a val-based finalist shortlist.
 
-Expected input: the same `workspace/evaluation/runs/*/results_val.csv` files
+Expected input: the same `workspace/results/runs/*/results_val.csv` files
 `select_finalist_from_val.py` reads (imports its loader directly rather than
 re-implementing it, so both scripts always agree on which runs/cases are in
 scope), plus that script's `pairwise_vs_top_val.csv` output for the forest
@@ -261,8 +261,8 @@ def plot_correlation_heatmap(df: pd.DataFrame, out_dir: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--runs-dir", default="workspace/evaluation/runs", type=Path)
-    ap.add_argument("--selection-dir", default="workspace/evaluation/finalist_selection", type=Path,
+    ap.add_argument("--runs-dir", default="workspace/results/runs", type=Path)
+    ap.add_argument("--selection-dir", default="workspace/results/finalist_selection", type=Path,
                      help="Where select_finalist_from_val.py wrote pairwise_vs_top_val.csv.")
     ap.add_argument("--out-dir", default="workspace/figures/finalist_selection", type=Path)
     ap.add_argument("--primary-metric", default="hd95_mm", choices=list(SUMMARY_PREFIX))

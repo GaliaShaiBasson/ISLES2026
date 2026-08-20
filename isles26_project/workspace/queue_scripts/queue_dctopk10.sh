@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.." || exit 1
 
 PY=/home/galia/miniconda3/envs/isles2026/bin/python
 PREDICT=/home/galia/miniconda3/envs/isles2026/bin/nnUNetv2_predict
-export nnUNet_extTrainer=/home/galia/ISLES2026/isles26_project_simplified
+export nnUNet_extTrainer=/home/galia/ISLES2026/isles26_project
 export nnUNet_raw=/home/galia/ISLES2026/nnUNet_raw
 export nnUNet_preprocessed=/home/galia/ISLES2026/nnUNet_preprocessed
 export nnUNet_results=/home/galia/ISLES2026/nnUNet_results
@@ -23,7 +23,7 @@ DATASET_DIR="$nnUNet_raw/Dataset002_ATLAS"
 CONFIG=3d_fullres
 FOLD=0
 TRAINER=nnUNetTrainerDCTopk10_500epochs
-MANIFEST=workspace/splits_full/manifest.csv
+MANIFEST=workspace/splits_dataset002/manifest.csv
 OUT_FOLDER="$nnUNet_results/Dataset002_ATLAS/${TRAINER}__nnUNetPlans__${CONFIG}/fold_${FOLD}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }

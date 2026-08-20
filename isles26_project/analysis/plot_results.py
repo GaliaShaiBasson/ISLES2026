@@ -188,7 +188,7 @@ def save_volume_scatter(df: pd.DataFrame, out_dir: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-csv", required=True)
-    parser.add_argument("--out-dir", default="figures")
+    parser.add_argument("--out-dir", default="workspace/figures/results_comparison")
     args = parser.parse_args()
 
     results_path = Path(args.results_csv)

@@ -34,7 +34,7 @@ python isles26.py doctor --create-dirs --require-raw
 - `nnUNet_raw`
 - `nnUNet_preprocessed`
 - `nnUNet_results`
-- `evaluation`
+- `results`
 - `figures`
 
 The runner loads those paths for each child process. You no longer need permanent shell environment variables, separate Bash/PowerShell commands, or a script that copies trainers into `site-packages`.
@@ -45,7 +45,7 @@ Generate the train/val/test_id/test_ood split first (replaces nnU-Net's
 default unstratified 5-fold CV — see `CLAUDE.md` for why):
 
 ```bash
-python data_prep/split_dataset.py --raw-root "/path/to/ATLAS_R3.0_raw" --out-dir workspace/splits
+python data_prep/split_dataset.py --raw-root "/path/to/ATLAS_R3.0_raw" --out-dir workspace/splits_dataset001
 ```
 
 Do not proceed past this step until `broken_cases.csv` is small/stable.
@@ -106,7 +106,7 @@ python isles26.py aggregate
 python isles26.py plot
 ```
 
-Outputs are written under `workspace/evaluation/` and `workspace/figures/` by default.
+Outputs are written under `workspace/results/` and `workspace/figures/` by default.
 
 ## Configuration
 
@@ -117,13 +117,25 @@ The custom trainers are discovered through nnU-Net's `nnUNet_extTrainer` mechani
 ## Project layout
 
 ```text
-isles26.py                         unified runner
-.env.example                       reproducible local configuration template
+isles26.py                         umbrella CLI -- wires the stage scripts below
+                                    under one `python isles26.py <command>` entry point
+core.py                            shared env/.env loading + run-identity fingerprinting,
+                                    imported by every stage script below
+setup_cli.py                       stage: init, doctor
+data_prep_cli.py                   stage: prepare, preprocess
+train_cli.py                       stage: train
+evaluate_cli.py                    stage: evaluate, aggregate, plot
+                                    -- each of the 4 stage scripts above is also
+                                    independently runnable on its own, e.g.
+                                    `python train_cli.py baseline-500 --dataset-id 2`
 data_prep/prepare_isles26_dataset.py
 custom_trainers/                   loss, sampling, and debug trainers
-evaluation/                        metrics and aggregation
-analysis/                          report figures
-training/                          compatibility wrappers for old commands
+evaluation/                        metrics and aggregation (code; results live in workspace/results/)
+analysis/                          report figures, incl. analysis/finalist_selection/
+ensembling/                        real softmax-averaged ensemble scoring
+scripts/                           core pipeline drivers (run_full_experiment.sh, check_status.sh, ...)
+docs/                              project/reference docs, incl. docs/reference/ PDFs
+workspace/                         all generated/runtime output -- see REPO_STRUCTURE_PLAN.md
 PROJECT_PLAN.md                    current run status, what's left before the report
 CLAUDE.md                          decisions log (why things deviate from defaults)
 ```

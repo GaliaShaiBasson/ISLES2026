@@ -27,25 +27,25 @@
 #     see CLAUDE.md future considerations).
 #
 # Usage:
-#   nohup ./run_500ep_full_experiment.sh > workspace/full_run_500ep_$(date +%Y%m%d_%H%M%S).log 2>&1 &
+#   nohup ./run_500ep_full_experiment.sh > workspace/logs/full_run_500ep_$(date +%Y%m%d_%H%M%S).log 2>&1 &
 #
-# To check progress while it runs: tail -f workspace/full_run_500ep_*.log
+# To check progress while it runs: tail -f workspace/logs/full_run_500ep_*.log
 # To stop it: pkill -f run_500ep_full_experiment.sh ; pkill -f nnUNetv2_train
 
 PY=/home/galia/miniconda3/envs/isles2026/bin/python
 PREDICT=/home/galia/miniconda3/envs/isles2026/bin/nnUNetv2_predict
-export nnUNet_extTrainer=/home/galia/ISLES2026/isles26_project_simplified
+export nnUNet_extTrainer=/home/galia/ISLES2026/isles26_project
 export nnUNet_raw=/home/galia/ISLES2026/nnUNet_raw
 export nnUNet_preprocessed=/home/galia/ISLES2026/nnUNet_preprocessed
 export nnUNet_results=/home/galia/ISLES2026/nnUNet_results
 
-cd /home/galia/ISLES2026/isles26_project_simplified || exit 1
+cd /home/galia/ISLES2026/isles26_project || exit 1
 
 DATASET_ID=2
 DATASET_DIR="$nnUNet_raw/Dataset002_ATLAS"
 CONFIG=3d_fullres
 FOLD=0
-MANIFEST=workspace/splits_full/manifest.csv
+MANIFEST=workspace/splits_dataset002/manifest.csv
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 

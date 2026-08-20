@@ -3,12 +3,12 @@
 can point at, so val-set softmax probabilities can be exported without ever
 touching the existing `fold_0/validation/` output or `imagesTr/` itself.
 
-Expected input layout: `--manifest` (default `workspace/splits_full/manifest.csv`,
+Expected input layout: `--manifest` (default `workspace/splits_dataset002/manifest.csv`,
 the same file `evaluate` already reads) with `case_id`/`split` columns, and
 `--images-dir` (default `nnUNet_raw/Dataset002_ATLAS/imagesTr`, nnU-Net's flat
 `<case_id>_0000.nii.gz` naming) holding the actual case files.
 
-What it produces: `--out-dir` (default `workspace/val_images_staged/`)
+What it produces: `--out-dir` (default `workspace/predictions/val_images_staged/`)
 populated with one symlink per val case, `<case_id>_0000.nii.gz` ->
 the real file in `--images-dir`. Symlinked, not copied, so this costs no
 extra disk for potentially large volumes and can never desync from the
@@ -40,9 +40,9 @@ import pandas as pd
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--manifest", default="workspace/splits_full/manifest.csv", type=Path)
+    ap.add_argument("--manifest", default="workspace/splits_dataset002/manifest.csv", type=Path)
     ap.add_argument("--images-dir", default="/home/galia/ISLES2026/nnUNet_raw/Dataset002_ATLAS/imagesTr", type=Path)
-    ap.add_argument("--out-dir", default="workspace/val_images_staged", type=Path)
+    ap.add_argument("--out-dir", default="workspace/predictions/val_images_staged", type=Path)
     ap.add_argument("--channel-suffix", default="_0000", help="nnU-Net single-channel file suffix before the extension.")
     ap.add_argument("--overwrite", action="store_true", help="Replace existing symlinks instead of skipping them.")
     args = ap.parse_args()

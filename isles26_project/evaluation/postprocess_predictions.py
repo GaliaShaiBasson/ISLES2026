@@ -40,8 +40,8 @@ test split.
 
 Usage:
     python evaluation/postprocess_predictions.py \\
-        --pred-dir workspace/evaluation/runs/<run_id>/predTs \\
-        --out-dir workspace/evaluation/runs/<run_id>/predTs_cc10 \\
+        --pred-dir workspace/results/runs/<run_id>/predTs \\
+        --out-dir workspace/results/runs/<run_id>/predTs_cc10 \\
         --min-voxels 10
 """
 from __future__ import annotations

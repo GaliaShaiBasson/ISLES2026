@@ -16,8 +16,8 @@ rules apply across all of it, not obvious from the commands alone:
   time makes the comparison uninterpretable.
 - Don't proceed past the split step until `broken_cases.csv` is small/stable
   (i.e. the raw-data upload has actually finished).
-- Before trusting a `sampling` run, inspect
-  `workspace/case_metadata.csv`'s `sampling_weight` distribution.
+- Before trusting a `sampling` run, inspect the relevant
+  `workspace/case_metadata/case_metadata*.csv`'s `sampling_weight` distribution.
 - Never treat the `debug` trainer's output as an experimental result — it's
   a pipeline check only.
 

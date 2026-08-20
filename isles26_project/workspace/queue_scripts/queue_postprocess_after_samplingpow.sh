@@ -6,7 +6,7 @@
 # including sampling-pow-500's own dataloader-worker CPU usage -- is done, not just
 # until the GPU itself frees up.
 set -u
-cd /home/galia/ISLES2026/isles26_project_simplified || exit 1
+cd /home/galia/ISLES2026/isles26_project || exit 1
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 

@@ -4,11 +4,11 @@ BEFORE committing GPU/CPU time to the full 5-trainer x ~120-case run.
 
 What it does: stages just `--n-cases` val images (default 2) for exactly
 one trainer, runs `nnUNetv2_predict --save_probabilities --device cpu` on
-them into a throwaway `workspace/smoketest_predVal_prob/` folder (never
+them into a throwaway `workspace/predictions/smoketest_predVal_prob/` folder (never
 touches the real predVal_prob/ path or any existing result), then scores
 the resulting mask against ground truth and compares it against the
 ALREADY-TRUSTED Dice for that exact case+trainer already sitting in
-`workspace/evaluation/runs/.../results_val.csv`.
+`workspace/results/runs/.../results_val.csv`.
 
 Why this is the right check: if the newly-computed Dice matches the
 already-scored one (should be exact or near-exact -- nnU-Net's sliding-
@@ -51,7 +51,7 @@ def main() -> None:
     ap.add_argument("--dice-tolerance", type=float, default=0.005)
     args = ap.parse_args()
 
-    run_dirs = sorted(Path("workspace/evaluation/runs").glob(f"{args.trainer}__3d_fullres__fold0__*"))
+    run_dirs = sorted(Path("workspace/results/runs").glob(f"{args.trainer}__3d_fullres__fold0__*"))
     if not run_dirs:
         raise SystemExit(f"No existing results_val.csv run dir found for {args.trainer} -- can't sanity-check against it.")
     known = pd.read_csv(run_dirs[0] / "results_val.csv").set_index("case_id")
@@ -59,7 +59,7 @@ def main() -> None:
     case_ids = known.index[: args.n_cases].tolist()
     print(f"Smoke-testing {args.trainer} on {len(case_ids)} case(s): {case_ids}")
 
-    stage_dir = Path("workspace/val_images_staged_smoketest")
+    stage_dir = Path("workspace/predictions/val_images_staged_smoketest")
     if stage_dir.exists():
         shutil.rmtree(stage_dir)
     stage_dir.mkdir(parents=True)
@@ -70,7 +70,7 @@ def main() -> None:
             raise SystemExit(f"Missing source image for {case_id}: {src}")
         (stage_dir / f"{case_id}_0000.nii.gz").symlink_to(src.resolve())
 
-    out_dir = Path("workspace/smoketest_predVal_prob") / args.trainer
+    out_dir = Path("workspace/predictions/smoketest_predVal_prob") / args.trainer
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
@@ -79,7 +79,7 @@ def main() -> None:
     print(f"Running nnUNetv2_predict --device cpu ({env_note}) -> {out_dir} ...")
     import os
     env = dict(os.environ)
-    env["nnUNet_extTrainer"] = "/home/galia/ISLES2026/isles26_project_simplified"
+    env["nnUNet_extTrainer"] = "/home/galia/ISLES2026/isles26_project"
     env["nnUNet_raw"] = str(NNUNET_RAW)
     env["nnUNet_preprocessed"] = str(NNUNET_PREPROCESSED)
     env["nnUNet_results"] = str(NNUNET_RESULTS)

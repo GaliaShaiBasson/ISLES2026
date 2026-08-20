@@ -1,11 +1,11 @@
 #!/bin/bash
 # Quick status check for an unattended full-pipeline run (run_full_experiment.sh /
 # run_500ep_full_experiment.sh style: sequential conditions, each doing
-# train -> predict -> evaluate, logged to workspace/full_run*.log).
+# train -> predict -> evaluate, logged to workspace/logs/full_run*.log).
 #
-# Usage:
-#   ./check_status.sh              # auto-picks the most recently modified full_run*.log
-#   ./check_status.sh <path-to-log>  # check a specific log file explicitly
+# Usage (run from anywhere -- resolves the project root itself):
+#   scripts/check_status.sh              # auto-picks the most recently modified full_run*.log
+#   scripts/check_status.sh <path-to-log>  # check a specific log file explicitly
 #
 # What it reports:
 #   - which run log it's reading, and how long it's been running
@@ -18,14 +18,17 @@
 #   - any Error/Traceback lines near the end of the log
 
 set -uo pipefail
-cd "$(dirname "$0")"
+# Project root, not this script's own directory (scripts/) -- so
+# workspace/logs/full_run*.log resolves correctly regardless of where this
+# is invoked from.
+cd "$(dirname "$0")/.."
 
 LOG="${1:-}"
 if [[ -z "$LOG" ]]; then
-    LOG=$(ls -t workspace/full_run*.log 2>/dev/null | head -1)
+    LOG=$(ls -t workspace/logs/full_run*.log 2>/dev/null | head -1)
 fi
 if [[ -z "$LOG" || ! -f "$LOG" ]]; then
-    echo "No workspace/full_run*.log found. Pass a log path explicitly."
+    echo "No workspace/logs/full_run*.log found. Pass a log path explicitly."
     exit 1
 fi
 

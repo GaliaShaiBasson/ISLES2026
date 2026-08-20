@@ -21,7 +21,7 @@
 #
 # Non-destructive by construction: every --pred-dir this script passes (validation/,
 # predTs) is only ever read. All filtered-mask and result-CSV output lands under
-# workspace/postprocess_grid/baseline500/, a brand-new tree -- nothing under
+# workspace/predictions/postprocess_grid/baseline500/, a brand-new tree -- nothing under
 # nnUNet_results/ or nnUNet_raw/ is written to. postprocess_predictions.py
 # additionally hard-refuses if any --out-dir were ever accidentally pointed at or
 # inside a --pred-dir (see its own guard).
@@ -40,22 +40,22 @@
 # rest of the grid.
 #
 # Usage:
-#   nohup ./run_postprocess_grid.sh > workspace/postprocess_grid_$(date +%Y%m%d_%H%M%S).log 2>&1 &
+#   nohup ./run_postprocess_grid.sh > workspace/logs/postprocess_grid_$(date +%Y%m%d_%H%M%S).log 2>&1 &
 #
-# To check progress while it runs: tail -f workspace/postprocess_grid_*.log
+# To check progress while it runs: tail -f workspace/logs/postprocess_grid_*.log
 # To stop it: pkill -f run_postprocess_grid.sh
 
 PY=/home/galia/miniconda3/envs/isles2026/bin/python
 
-cd /home/galia/ISLES2026/isles26_project_simplified || exit 1
+cd /home/galia/ISLES2026/isles26_project || exit 1
 
 CHECKPOINT_DIR=/home/galia/ISLES2026/nnUNet_results/Dataset002_ATLAS/nnUNetTrainerBaseline_500epochs__nnUNetPlans__3d_fullres/fold_0
 VAL_PRED_DIR="$CHECKPOINT_DIR/validation"
 VAL_GT_DIR=/home/galia/ISLES2026/nnUNet_raw/Dataset002_ATLAS/labelsTr
 TEST_PRED_DIR="$CHECKPOINT_DIR/predTs"
 TEST_GT_DIR=/home/galia/ISLES2026/nnUNet_raw/Dataset002_ATLAS/labelsTs
-META=workspace/splits_full/manifest.csv
-OUT_ROOT=workspace/postprocess_grid/baseline500
+META=workspace/splits_dataset002/manifest.csv
+OUT_ROOT=workspace/predictions/postprocess_grid/baseline500
 VAL_ROOT="$OUT_ROOT/val_search"
 TEST_ROOT="$OUT_ROOT/test_final"
 

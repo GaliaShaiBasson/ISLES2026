@@ -5,7 +5,7 @@
 #
 # NOT auto-run by any pipeline script -- launch this by hand once GPU (or
 # CPU, see --device below) time is actually free. Mirrors
-# workspace/predict_prob_remaining.sh's sequential-only pattern (see
+# workspace/queue_scripts/predict_prob_remaining.sh's sequential-only pattern (see
 # CLAUDE.md "Optimizing GPU usage": concurrent nnUNetv2_predict jobs
 # contend for GPU compute even when VRAM looks idle).
 #
@@ -37,7 +37,7 @@
 # behavior if these were left unset).
 set -uo pipefail
 
-export nnUNet_extTrainer=/home/galia/ISLES2026/isles26_project_simplified
+export nnUNet_extTrainer=/home/galia/ISLES2026/isles26_project
 export nnUNet_raw=/home/galia/ISLES2026/nnUNet_raw
 export nnUNet_preprocessed=/home/galia/ISLES2026/nnUNet_preprocessed
 export nnUNet_results=/home/galia/ISLES2026/nnUNet_results
@@ -46,7 +46,7 @@ PY=/home/galia/miniconda3/envs/isles2026/bin/python
 PREDICT=/home/galia/miniconda3/envs/isles2026/bin/nnUNetv2_predict
 DATASET_ID=2
 DATASET_DIR="$nnUNet_raw/Dataset002_ATLAS"
-STAGED_DIR="workspace/val_images_staged"
+STAGED_DIR="workspace/predictions/val_images_staged"
 
 # Default device is CPU deliberately -- pick this over GPU whenever a real
 # training job might be using the GPU (check `nvidia-smi`/`ps aux | grep
@@ -57,7 +57,7 @@ PARALLEL=0
 TOTAL_CORES=100
 
 # Finalist shortlist from the val-based redundancy analysis
-# (workspace/evaluation/finalist_selection/redundancy_recommendation.csv) --
+# (workspace/results/finalist_selection/redundancy_recommendation.csv) --
 # update this list if the shortlist changes, don't silently diverge from it.
 TRAINERS=(
   nnUNetTrainerWideAugBaseline_500epochs
@@ -118,9 +118,9 @@ if [ "$PARALLEL" -eq 1 ]; then
   export MKL_NUM_THREADS="$threads_per_job"
   pids=()
   for trainer in "${TRAINERS[@]}"; do
-    run_one "$trainer" > "workspace/export_val_prob_${trainer}.log" 2>&1 &
+    run_one "$trainer" > "workspace/logs/export_val_prob_${trainer}.log" 2>&1 &
     pids+=($!)
-    log "launched $trainer (pid $!), log -> workspace/export_val_prob_${trainer}.log"
+    log "launched $trainer (pid $!), log -> workspace/logs/export_val_prob_${trainer}.log"
   done
   fail=0
   for i in "${!pids[@]}"; do

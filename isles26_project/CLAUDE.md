@@ -12,16 +12,17 @@ together. Cross-reference rather than duplicate.
 
 ## Checking on a running unattended experiment
 
-When asked for run status, use `./check_status.sh` (in this directory) rather
-than manually grepping the log. It auto-picks the newest `workspace/full_run*.log`
+When asked for run status, use `scripts/check_status.sh` (run from the project
+root; it resolves paths itself regardless of CWD) rather than manually
+grepping the log. It auto-picks the newest `workspace/logs/full_run*.log`
 and reports: which condition is done/in-progress/pending, current epoch +
 latest train/val loss + pseudo dice + best EMA dice for the in-progress
 condition, an ETA to finish training, whether the driver script and
 `nnUNetv2_train` process are actually alive, and any errors near the log tail.
 
 ```
-./check_status.sh                 # most recent full_run*.log
-./check_status.sh <path-to-log>    # a specific run's log
+scripts/check_status.sh                 # most recent full_run*.log
+scripts/check_status.sh <path-to-log>    # a specific run's log
 ```
 
 ## Standing constraint: nnU-Net version is pinned, not just a dependency choice
@@ -58,6 +59,92 @@ trainer against the new internals before trusting results from it.
 ## Decisions log
 
 Newest first. Each entry: decision, rationale, where it's implemented.
+
+### Repo structure reorg: isles26_project_simplified duplicated into this dir, split into stage CLIs, paths reorganized (2026-08-20)
+
+- **Context:** the project had accumulated real structural mess in
+  `isles26_project_simplified/` -- duplicate `figures/`/`evaluation/`
+  directories at two levels (code dir vs. output dir with the same name),
+  loose scripts/logs at the project root instead of under `workspace/`,
+  five separate "old stuff" archive locations, and a single ~1,300-line
+  `isles26.py` mixing shared env/fingerprinting infrastructure with five
+  distinct command groups. See `REPO_STRUCTURE_PLAN.md` for the full
+  before/after audit.
+- **Approach: duplicate first, reorganize the copy, never touch the
+  original until everything is verified.** `isles26_project_simplified/`
+  was copied whole to this directory (`isles26_project/`) and every change
+  below was made only here -- the original stayed live/tracked/untouched
+  throughout, so nothing was at risk if the reorg went wrong partway.
+- **Directory reorg:** `docs/` (+ `docs/reference/` for the PDFs),
+  `scripts/` (core pipeline drivers only -- `run_full_experiment.sh`,
+  `run_500ep_full_experiment.sh`, `run_postprocess_grid.sh`,
+  `check_status.sh`, `sanity_overfit_check.sh`), `workspace/evaluation/` ->
+  `workspace/results/` (stopped colliding conceptually with the
+  `evaluation/` code dir), `workspace/case_metadata_*.csv` ->
+  `workspace/case_metadata/`, loose `workspace/*.log` -> `workspace/logs/`,
+  prediction/postprocess output dirs -> `workspace/predictions/`,
+  `workspace/figures/` split by topic (`learning_curves/`,
+  `results_comparison/`, `threshold_analysis/`, alongside the pre-existing
+  `augmentation_examples/`/`finalist_selection/`), all queue/launcher
+  scripts (regardless of origin dir) consolidated into
+  `workspace/queue_scripts/`, `analysis/finalist_selection/` grouped (the
+  3 finalist-selection-specific analysis scripts, kept inside `analysis/`
+  rather than merged into `ensembling/` -- a real distinction: `analysis/`
+  never touches GPU/CPU, `ensembling/` actually runs predictions -- see
+  `ensemble_val.py`'s own docstring). `workspace/splits/` and
+  `workspace/splits_full/` renamed to `workspace/splits_dataset001/` and
+  `workspace/splits_dataset002/` (dataset-id-based, self-documenting --
+  "full" previously meant *fewer* cases than plain `splits/`, which read
+  backwards). `training/`'s old per-condition `.sh`/`.ps1` launcher pairs
+  (superseded by `run_full_experiment.sh` and predating `isles26.py`
+  becoming cross-platform) archived to
+  `workspace/archive/training_legacy_scripts/`.
+- **`isles26.py` split into stage CLIs**, since it was one file mixing
+  shared infra with five distinct command groups: `core.py` (env/.env
+  loading, `run_command`, run-identity fingerprinting, checkpoint path
+  resolution -- imported by every stage, so none of them duplicate this
+  logic), `setup_cli.py` (init, doctor), `data_prep_cli.py` (prepare,
+  preprocess), `train_cli.py` (train -- `TRAINER_GROUPS` lives here),
+  `evaluate_cli.py` (evaluate, aggregate, plot). Each stage script is
+  independently runnable on its own (e.g. `python train_cli.py
+  baseline-500 --dataset-id 2`, no "train" subcommand needed) as well as
+  via `isles26.py`, which is now a thin umbrella that imports each stage's
+  `register()` function. `data_prep_cli.py`'s and `evaluate_cli.py`'s
+  splits-dir/manifest auto-detection became genuinely dataset-id-aware in
+  the process (previously both silently defaulted to the same
+  `workspace/splits` regardless of `--dataset-id`, a gap the old single
+  name papered over).
+- **Real bugs found and fixed while verifying the reorg, not just
+  mechanical renames:**
+  - `ensembling/ensemble_val.py` did `sys.path.insert(...,
+    ".../analysis")` then imported `select_finalist_from_val`/
+    `plot_finalist_selection` as top-level modules -- broken by the
+    `analysis/finalist_selection/` move until the insert was pointed one
+    level deeper.
+  - 11 files (`scripts/*.sh`, `workspace/queue_scripts/*.sh`,
+    `ensembling/export_val_probabilities.sh`) hardcoded `cd`/
+    `nnUNet_extTrainer` to the literal path
+    `/home/galia/ISLES2026/isles26_project_simplified` -- would have
+    silently run against the *old* project directory entirely from inside
+    the new one. Fixed to point at `isles26_project`.
+  - `scripts/check_status.sh` did `cd "$(dirname "$0")"`, which correctly
+    landed at the project root when the script lived there -- but after
+    moving into `scripts/`, that same line landed it *inside* `scripts/`,
+    breaking its relative `workspace/...` log glob. Fixed to `cd
+    "$(dirname "$0")/.."`.
+- Verified live throughout, not just read over: `doctor` (incl. custom
+  trainer discovery), `train --print-only`, `aggregate` (correctly found
+  all 7 real run directories under the new `workspace/results/runs/`),
+  `plot`, `prepare --print-only` for both dataset 1 and 2 (confirmed the
+  new dataset-id-aware splits-dir resolution), every stage script's
+  `--help` standalone and via the umbrella, and `bash -n` across every
+  touched shell script.
+- **Not done:** the dated entries below this one still describe file
+  layouts as they were *at the time* (e.g. `workspace/evaluation/...`) --
+  left as historical record, not retroactively rewritten. Only this file's
+  evergreen instructions (like the `check_status.sh` line above) and
+  `README.md`/`PROJECT_PLAN.md`'s undated operational sections were
+  corrected to the new paths.
 
 ### DC+TopK10 dropped: same empty-prediction collapse as pure TopK10, on the overfit-check gate this time (2026-08-19 night / 2026-08-20)
 

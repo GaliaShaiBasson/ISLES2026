@@ -42,7 +42,7 @@ committed or inspected -- see the --final-holdout-dir docstring below and the
 repo .gitignore. manifest.csv only carries the four dev-time splits.
 
 Usage:
-    python split_dataset.py --raw-root /path/to/ATLAS3_Training_Raw --out-dir workspace/splits_full
+    python split_dataset.py --raw-root /path/to/ATLAS3_Training_Raw --out-dir workspace/splits_dataset002
 """
 from __future__ import annotations
 

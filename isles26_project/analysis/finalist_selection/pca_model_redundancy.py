@@ -10,7 +10,7 @@ The heatmap only shows pairwise redundancy; PCA/clustering can catch a
 threshold but the group still collectively spans just one axis of real
 variation.
 
-Expected input: same `workspace/evaluation/runs/*/results_val.csv` files as
+Expected input: same `workspace/results/runs/*/results_val.csv` files as
 the other two scripts (imports their loaders directly).
 
 Method: build a (trainer x case) matrix of per-case val Dice, treat each
@@ -195,7 +195,7 @@ def recommend(clusters: pd.DataFrame, df: pd.DataFrame, primary_metric: str, out
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--runs-dir", default="workspace/evaluation/runs", type=Path)
+    ap.add_argument("--runs-dir", default="workspace/results/runs", type=Path)
     ap.add_argument("--out-dir", default="workspace/figures/finalist_selection", type=Path)
     ap.add_argument("--primary-metric", default="hd95_mm")
     ap.add_argument("--redundancy-corr-threshold", type=float, default=0.95,

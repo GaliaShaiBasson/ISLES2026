@@ -7,13 +7,13 @@ Expected input: `predVal_prob/` directories written by
 `export_val_probabilities.sh` under each shortlisted trainer's normal
 nnU-Net results path (`.../fold_0/predVal_prob/*.npz` + `.pkl`) -- run that
 script first if they don't exist yet; this script never launches inference
-itself. Also reads `workspace/evaluation/runs/*/results_val.csv` (via
+itself. Also reads `workspace/results/runs/*/results_val.csv` (via
 `select_finalist_from_val`'s loader) for the best single-model val scores
 to compare ensembles against, and `--gt-dir` (default
 `nnUNet_raw/Dataset002_ATLAS/labelsTr`) for ground truth.
 
 What it produces (under `--out-dir`, default
-`workspace/evaluation/finalist_selection/`):
+`workspace/results/finalist_selection/`):
 - `voxel_probability_correlation.png`/`.csv` -- per-voxel Pearson r of the
   foreground-probability channel between every pair of shortlisted
   trainers, averaged over the shared val cases. A finer-grained
@@ -58,7 +58,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import pearsonr
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "analysis"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "analysis" / "finalist_selection"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "evaluation"))
 from select_finalist_from_val import discover_runs, load_all, check_paired  # noqa: E402
 from plot_finalist_selection import short_name, trainer_colors, BLUE_SEQUENTIAL  # noqa: E402
@@ -204,10 +204,10 @@ def paired_bootstrap_vs_top(ensemble_scores: pd.Series, top_scores: pd.Series, n
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--trainers", nargs="+", default=DEFAULT_TRAINERS)
-    ap.add_argument("--runs-dir", default="workspace/evaluation/runs", type=Path)
+    ap.add_argument("--runs-dir", default="workspace/results/runs", type=Path)
     ap.add_argument("--gt-dir", default=str(NNUNET_RAW / DATASET_NAME / "labelsTr"), type=Path)
-    ap.add_argument("--out-dir", default="workspace/evaluation/finalist_selection", type=Path)
-    ap.add_argument("--work-dir", default="workspace/evaluation/ensemble_tmp", type=Path)
+    ap.add_argument("--out-dir", default="workspace/results/finalist_selection", type=Path)
+    ap.add_argument("--work-dir", default="workspace/results/ensemble_tmp", type=Path)
     ap.add_argument("--combos", default=None, help='e.g. "FocalTversky+TverskyMild,WideAugBaseline+FocalTversky"')
     ap.add_argument("--primary-metric", default="hd95_mm", choices=["dice", "hd95_mm", "lesion_f1"])
     ap.add_argument("--n-bootstrap", type=int, default=2000)

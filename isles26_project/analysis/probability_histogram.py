@@ -23,10 +23,10 @@ Usage:
     python analysis/probability_histogram.py \\
         --prob-dir /path/to/validation \\
         --gt-dir /path/to/labelsTr \\
-        --case-metadata-csv workspace/splits_full/manifest.csv \\
+        --case-metadata-csv workspace/splits_dataset002/manifest.csv \\
         --split val \\
         --experiment-name baseline_val \\
-        --out-dir figures
+        --out-dir workspace/figures/threshold_analysis
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def main() -> int:
     parser.add_argument("--case-metadata-csv", required=True, help="CSV with case_id (+ optional split) columns")
     parser.add_argument("--split", default=None, help="Restrict to this value of the metadata's split column")
     parser.add_argument("--experiment-name", required=True)
-    parser.add_argument("--out-dir", default="figures")
+    parser.add_argument("--out-dir", default="workspace/figures/threshold_analysis")
     parser.add_argument("--num-bins", type=int, default=50)
     parser.add_argument("--linear-yscale", action="store_true", help="Use a linear y-axis instead of log")
     args = parser.parse_args()

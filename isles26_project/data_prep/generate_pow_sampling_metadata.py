@@ -9,7 +9,7 @@ Produces: a copy of that CSV with `sampling_weight` recomputed via
 `(1 / total_lesion_volume_in_bin) ** p`) instead of the fixed 4:2:1 ratio in
 `sampling_weights_from_size_bin`. All other columns are passed through unchanged.
 
-Written to a separate file (default: workspace/case_metadata_pow_p05.csv), never
+Written to a separate file (default: workspace/case_metadata/case_metadata_pow_p05.csv), never
 overwriting the input -- this is specifically so
 `nnUNetTrainerLesionAwareSamplingPow_250epochs` can run as an independent comparison
 against the original `nnUNetTrainerLesionAwareSampling_250epochs` without either one
@@ -19,8 +19,8 @@ original fixed ratio.
 
 Usage:
     python data_prep/generate_pow_sampling_metadata.py \
-        --in-csv workspace/case_metadata.csv \
-        --out-csv workspace/case_metadata_pow_p05.csv \
+        --in-csv workspace/case_metadata/case_metadata.csv \
+        --out-csv workspace/case_metadata/case_metadata_pow_p05.csv \
         --p 0.5
 """
 from __future__ import annotations
@@ -37,8 +37,8 @@ from metadata_utils import sampling_weights_from_size_bin_power  # noqa: E402
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--in-csv", default="workspace/case_metadata.csv")
-    parser.add_argument("--out-csv", default="workspace/case_metadata_pow_p05.csv")
+    parser.add_argument("--in-csv", default="workspace/case_metadata/case_metadata.csv")
+    parser.add_argument("--out-csv", default="workspace/case_metadata/case_metadata_pow_p05.csv")
     parser.add_argument("--p", type=float, default=0.5)
     args = parser.parse_args()
 

@@ -49,10 +49,10 @@ Usage:
         --log "250 epochs=/path/to/fold_0/training_log_2026_8_17_02_13_04.txt" \\
         --log "500 epochs=/path/to/fold_0/training_log_2026_8_18_01_35_16.txt" \\
         # --log "1000 epochs=/path/to/fold_0/training_log_<timestamp>.txt" \\  # not run yet
-        --tag baseline_250_vs_500_vs_1000 --out-dir figures
+        --tag baseline_250_vs_500_vs_1000 --out-dir workspace/figures/learning_curves
 
     # auto-discover every trainer from the current runs_index.csv
-    python analysis/plot_learning_curves.py --tag all_trainers --out-dir figures
+    python analysis/plot_learning_curves.py --tag all_trainers --out-dir workspace/figures/learning_curves
 """
 import argparse
 import csv
@@ -184,7 +184,7 @@ def parse_args():
              "column of --runs-index). Ignored if --log is given.",
     )
     p.add_argument("--tag", required=True, help="Suffix used in output filenames, e.g. 'baseline_250_vs_500'.")
-    p.add_argument("--out-dir", default="figures", help="Directory to write PNGs/CSVs into (default: figures).")
+    p.add_argument("--out-dir", default="workspace/figures/learning_curves", help="Directory to write PNGs/CSVs into (default: figures).")
     return p.parse_args()
 
 

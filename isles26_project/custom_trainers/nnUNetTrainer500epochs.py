@@ -95,14 +95,14 @@ class nnUNetTrainerLesionAwareSampling_500epochs_full(_Epochs500Mixin, nnUNetTra
     natural name) to keep it visually distinct from the existing 250-epoch
     dataset001 sampling trainer -- a naming collision risk given both differ
     only by epoch count and dataset otherwise. Own dedicated metadata CSV env
-    var + default (workspace/case_metadata_full.csv, matching this session's
+    var + default (workspace/case_metadata/case_metadata_full.csv, matching this session's
     naming agreement for the dataset002 metadata), same isolation pattern
     the Pow variant already established -- never reads the dataset001
     case_metadata.csv, regardless of what ISLES26_CASE_METADATA_CSV is set to.
     """
 
     CASE_METADATA_CSV_ENV_VAR = "ISLES26_CASE_METADATA_CSV_FULL"
-    CASE_METADATA_CSV_DEFAULT = "workspace/case_metadata_full.csv"
+    CASE_METADATA_CSV_DEFAULT = "workspace/case_metadata/case_metadata_full.csv"
 
 
 class nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full(
@@ -181,7 +181,7 @@ class nnUNetTrainerLesionAwareSamplingPow_500epochs_full(_Epochs500Mixin, nnUNet
     and the 2026-08-17 CLAUDE.md entry); this asks whether a stronger correction pushes
     test_ood further, or whether 4:2:1's OOD result was noise.
 
-    Metadata CSV isolation: reads workspace/case_metadata_pow_p05_full.csv (generated
+    Metadata CSV isolation: reads workspace/case_metadata/case_metadata_pow_p05_full.csv (generated
     from case_metadata_full.csv via data_prep/generate_pow_sampling_metadata.py --p 0.5),
     never the plain 4:2:1 file above and never the 250-epoch/dataset001 pow file --
     three separate sampling-weight CSVs, three separate trainers, no shared state.
