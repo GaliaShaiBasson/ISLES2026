@@ -60,6 +60,57 @@ trainer against the new internals before trusting results from it.
 
 Newest first. Each entry: decision, rationale, where it's implemented.
 
+### Primary metric switched to Dice, project-wide (2026-08-20)
+
+- **Decision:** every script's `--primary-metric` default flips from `hd95_mm`
+  to `dice` (tiebreak flips the other way, to `hd95_mm`) --
+  `select_finalist_from_val.py`, `plot_finalist_selection.py`,
+  `pca_model_redundancy.py`, `pca_probability_redundancy.py`,
+  `ensembling/ensemble_val.py`, `ensembling/ensemble_test.py`, and
+  `evaluation/summarize_postprocess_grid.py`'s `--selection-metric`/
+  `--tiebreak-metric` (`dice_mean`/`hd95_mean`). `rank_trainers()`'s tiebreak
+  logic already swapped bidirectionally before this change (`tiebreak_metric
+  = "dice" if primary_metric != "dice" else "hd95_mm"`), so only each
+  script's CLI *default* needed changing, not the ranking logic itself.
+- **Why:** Dice is always defined (HD95 is NaN whenever prediction or ground
+  truth is empty -- tracked via the existing `hd95_n_nan` column -- this
+  project has real empty-lesion cases), lower-variance across a val/test set
+  this size (119-129 cases per split) since it isn't dominated by a few
+  outlier boundary-distance cases the way HD95 can be, and it's the metric
+  virtually every comparable segmentation report/challenge leads with --
+  more legible for the report's Experiments section. HD95 and lesion-F1
+  remain fully reported everywhere, just no longer the tie-breaking/ranking
+  axis by default.
+- **Real, not just cosmetic, consequence: `postprocess_predictions.py`'s
+  connected-component grid search needs re-running under
+  `--selection-metric dice_mean`.** Its original "no-op wins" conclusion
+  (see "Backfill complete"/two-night-plan entries below) was reached under
+  hd95_mean-primary selection specifically because HD95 is the metric small
+  spurious components distort most -- that was a deliberate, real reason to
+  use HD95 for *that* search even though the general primary metric has now
+  moved to Dice. The original run's numbers are reassuring (dice_mean moved
+  by ≤0.0004 across all 20 combos), suggesting the conclusion likely still
+  holds under dice-primary selection too -- but this needs confirming by an
+  actual rerun, not assumed to carry over silently. **Rerun on the same val
+  set as the original search** (`fold_0/validation/` predictions vs.
+  `labelsTr`, 120 cases) -- never test_id/test_ood; that discipline (tune
+  post-processing only on val, apply the one frozen choice to test exactly
+  once) doesn't change just because the primary metric did. Not yet done as
+  of this entry -- planned for 2026-08-21.
+
+### Migration confirmed: isles26_project is now the active project, isles26_project_simplified to be archived (2026-08-20)
+
+- **Decision:** the "duplicate first, verify, never touch the original" reorg
+  below is done being cautious -- `isles26_project/` is now where all new
+  work happens (code edits, new analysis scripts, ensembling work). `.env`
+  paths, all real trained checkpoints (`nnUNet_results/` etc.), and the
+  shared `.gitignore` entries were already reorganized/verified in the
+  entry below; nothing new was needed to make the switch.
+- **`isles26_project_simplified/` is not maintained going forward** -- it
+  will likely move to `archive/` once nothing else still reads from it.
+  Don't port new changes there; if something is found broken only in that
+  copy, it's no longer worth fixing.
+
 ### Repo structure reorg: isles26_project_simplified duplicated into this dir, split into stage CLIs, paths reorganized (2026-08-20)
 
 - **Context:** the project had accumulated real structural mess in
