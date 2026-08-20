@@ -1,0 +1,7 @@
+Smoke-testing nnUNetTrainerWideAugBaseline_500epochs on 2 case(s): ['ATLAS_r001s003_ses1', 'ATLAS_r001s012_ses1']
+Running nnUNetv2_predict --device cpu (OMP_NUM_THREADS=8 MKL_NUM_THREADS=8) -> workspace/smoketest_predVal_prob/nnUNetTrainerWideAugBaseline_500epochs ...
+Prediction finished, verifying outputs...
+  [PASS] ATLAS_r001s003_ses1: probs shape=(2, 197, 225, 168) range_ok=True sums_to_one=True | new_dice=0.7934 known_dice=0.7934 diff=0.0000 (tolerance 0.005)
+  [PASS] ATLAS_r001s012_ses1: probs shape=(2, 198, 200, 162) range_ok=True sums_to_one=True | new_dice=0.7366 known_dice=0.7368 diff=0.0001 (tolerance 0.005)
+
+=== SMOKE TEST PASSED: staging -> CPU predict -> scoring pipeline matches the trusted val results. Safe to run export_val_probabilities.sh for real. ===

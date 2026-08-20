@@ -1,0 +1,20 @@
+{
+  "case_metadata_csv": "workspace/splits_full/manifest.csv",
+  "checkpoint_final": "/home/galia/ISLES2026/nnUNet_results/Dataset002_ATLAS/nnUNetTrainerTverskyMild_500epochs__nnUNetPlans__3d_fullres/fold_0/checkpoint_final.pth",
+  "checkpoint_final_mtime": "2026-08-18T15:44:41",
+  "configuration": "3d_fullres",
+  "dataset": "Dataset002_ATLAS",
+  "experiment_name": "nnUNetTrainerTverskyMild_500epochs",
+  "fold": "0",
+  "git_commit": "1e69706e4bc026a2b32ab29da3950235ffe80a23",
+  "gt_dir": "/home/galia/ISLES2026/nnUNet_raw/Dataset002_ATLAS/labelsTs",
+  "n_folds_in_split": 1,
+  "num_epochs": 500,
+  "pred_dir": "/home/galia/ISLES2026/nnUNet_results/Dataset002_ATLAS/nnUNetTrainerTverskyMild_500epochs__nnUNetPlans__3d_fullres/fold_0/predTs",
+  "recorded_at": "2026-08-19T15:25:33",
+  "run_id": "nnUNetTrainerTverskyMild_500epochs__3d_fullres__fold0__fp8959622c8f",
+  "sampling_weight_hash": null,
+  "save_every": 10,
+  "split": "test",
+  "trainer": "nnUNetTrainerTverskyMild_500epochs"
+}

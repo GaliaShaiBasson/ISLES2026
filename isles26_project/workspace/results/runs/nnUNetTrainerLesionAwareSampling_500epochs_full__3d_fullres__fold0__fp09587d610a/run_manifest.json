@@ -1,0 +1,20 @@
+{
+  "case_metadata_csv": "workspace/splits_full/manifest.csv",
+  "checkpoint_final": "/home/galia/ISLES2026/nnUNet_results/Dataset002_ATLAS/nnUNetTrainerLesionAwareSampling_500epochs_full__nnUNetPlans__3d_fullres/fold_0/checkpoint_final.pth",
+  "checkpoint_final_mtime": "2026-08-18T20:26:49",
+  "configuration": "3d_fullres",
+  "dataset": "Dataset002_ATLAS",
+  "experiment_name": "nnUNetTrainerLesionAwareSampling_500epochs_full",
+  "fold": "0",
+  "git_commit": "1e69706e4bc026a2b32ab29da3950235ffe80a23",
+  "gt_dir": "/home/galia/ISLES2026/nnUNet_raw/Dataset002_ATLAS/labelsTs",
+  "n_folds_in_split": 1,
+  "num_epochs": 500,
+  "pred_dir": "/home/galia/ISLES2026/nnUNet_results/Dataset002_ATLAS/nnUNetTrainerLesionAwareSampling_500epochs_full__nnUNetPlans__3d_fullres/fold_0/predTs",
+  "recorded_at": "2026-08-19T15:00:20",
+  "run_id": "nnUNetTrainerLesionAwareSampling_500epochs_full__3d_fullres__fold0__fp09587d610a",
+  "sampling_weight_hash": "ab4a1e1677",
+  "save_every": 10,
+  "split": "test",
+  "trainer": "nnUNetTrainerLesionAwareSampling_500epochs_full"
+}
