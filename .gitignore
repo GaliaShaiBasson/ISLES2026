@@ -37,12 +37,22 @@ isles26_project/workspace/predictions/smoketest_predVal_prob
 # then recreated) every combo/run -- never a deliverable, unlike the CSVs/PNGs
 # in the sibling finalist_selection/ directory, which stay tracked.
 isles26_project/workspace/results/ensemble_tmp
+# ensemble_test.py's --work-dir: same reasoning -- scratch ensembled masks for
+# the held-out (test_id/test_ood) scoring pass, rewritten every run, never a
+# deliverable (the real output is workspace/results/runs/ensemble_*/results_test.csv).
+isles26_project/workspace/results/ensemble_test_tmp
 
 # Hidden final-holdout test set (id + ood) -- this project's stand-in for the
 # real, never-received ISLES'26 challenge test set. Must never be committed or
 # casually inspected; also self-.gitignore's via its own .gitignore. See
 # data_prep/split_dataset.py and CLAUDE.md.
 **/final_holdout/
+# ...except: let the isles26_project final_holdout/ directory itself register
+# in git (via a tracked .gitkeep) so the folder's existence is visible in the
+# repo structure -- e.g. to Claude via the GitHub connector -- without
+# un-hiding any of its contents. The dir's own .gitignore ("*", with a
+# !.gitkeep exception) still blocks every real file underneath.
+!isles26_project/workspace/final_holdout/
 
 # Generated outputs
 results.csv
@@ -54,6 +64,25 @@ figures/
 isles26_project_simplified/workspace/val_images_staged
 isles26_project_simplified/workspace/val_images_staged_smoketest
 isles26_project_simplified/workspace/*.log
+
+# --- Report/presentation exceptions (isles26_project only) ---
+# The report-worthy figures and summary tables above get blanket-ignored by
+# the "Generated outputs" rules (figures/, results.csv, etc.) along with the
+# scratch/debug output they're meant to catch. Un-ignore just these specific,
+# curated paths so they stay in the repo (and visible to Claude via the
+# GitHub connector) for the presentation/report. Everything else under
+# workspace/ (predictions, raw NIfTI, final_holdout/, archive/) stays hidden.
+!isles26_project/workspace/figures/
+!isles26_project/workspace/figures/**
+!isles26_project/workspace/sample_run/figures/
+!isles26_project/workspace/sample_run/figures/**
+!isles26_project/workspace/results/results.csv
+!isles26_project/workspace/results/summary_by_experiment.csv
+!isles26_project/workspace/results/summary_by_size_bin.csv
+!isles26_project/workspace/sample_run/case_metadata.csv
+!isles26_project/workspace/sample_run/evaluation/results.csv
+!isles26_project/workspace/sample_run/evaluation/summary_by_experiment.csv
+!isles26_project/workspace/sample_run/evaluation/summary_by_size_bin.csv
 
 # Python
 __pycache__/

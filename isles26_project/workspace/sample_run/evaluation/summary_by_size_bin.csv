@@ -1,0 +1,9 @@
+,,dice,dice,dice,dice,hd95_mm,hd95_mm,hd95_mm,hd95_mm
+,,mean,std,median,count,mean,std,median,count
+experiment,size_bin,,,,,,,,
+sample_debug_test,large,0.0,0.0,0.0,4,,,,0
+sample_debug_test,medium,0.0,0.0,0.0,3,,,,0
+sample_debug_test,small,0.0,0.0,0.0,4,,,,0
+sample_debug_val,large,0.0,0.0,0.0,2,,,,0
+sample_debug_val,medium,0.0,0.0,0.0,2,,,,0
+sample_debug_val,small,0.0,0.0,0.0,2,,,,0
