@@ -1,10 +1,10 @@
 trainer,cluster_id,cluster_size,val_rank_in_cluster,recommended_action,reason
-nnUNetTrainerFocalTversky_500epochs,1,1,1,keep (no redundant peer found),
-nnUNetTrainerTverskyMild_500epochs,2,1,3,keep (no redundant peer found),
-nnUNetTrainerBaseline_500epochs (nnUNetResEncUNetMPlans),3,2,2,keep (best-ranked in its redundancy cluster),"cluster: Baseline (ResEncM), WideAugBaseline (ResEncM)"
-nnUNetTrainerWideAugBaseline_500epochs (nnUNetResEncUNetMPlans),3,2,5,drop candidate -- redundant with Baseline (ResEncM),"cluster: Baseline (ResEncM), WideAugBaseline (ResEncM)"
-nnUNetTrainerWideAugBaseline_500epochs,4,3,0,keep (best-ranked in its redundancy cluster),"cluster: WideAugBaseline, Baseline, LesionAwareSampling"
-nnUNetTrainerBaseline_500epochs,4,3,4,drop candidate -- redundant with WideAugBaseline,"cluster: WideAugBaseline, Baseline, LesionAwareSampling"
-nnUNetTrainerLesionAwareSampling_500epochs_full,4,3,6,drop candidate -- redundant with WideAugBaseline,"cluster: WideAugBaseline, Baseline, LesionAwareSampling"
-nnUNetTrainerLesionAwareSamplingPow_500epochs_full,5,1,7,keep (no redundant peer found),
-nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full,6,1,8,keep (no redundant peer found),
+nnUNetTrainerFocalTversky_500epochs,1,1,2,keep (no redundant peer found),
+nnUNetTrainerTverskyMild_500epochs,2,1,5,keep (no redundant peer found),
+nnUNetTrainerWideAugBaseline_500epochs (nnUNetResEncUNetMPlans),3,2,0,keep (best-ranked in its redundancy cluster),"cluster: WideAugBaseline (ResEncM), Baseline (ResEncM)"
+nnUNetTrainerBaseline_500epochs (nnUNetResEncUNetMPlans),3,2,1,drop candidate -- redundant with WideAugBaseline (ResEncM),"cluster: WideAugBaseline (ResEncM), Baseline (ResEncM)"
+nnUNetTrainerBaseline_500epochs,4,3,3,keep (best-ranked in its redundancy cluster),"cluster: Baseline, WideAugBaseline, LesionAwareSampling"
+nnUNetTrainerWideAugBaseline_500epochs,4,3,4,drop candidate -- redundant with Baseline,"cluster: Baseline, WideAugBaseline, LesionAwareSampling"
+nnUNetTrainerLesionAwareSampling_500epochs_full,4,3,6,drop candidate -- redundant with Baseline,"cluster: Baseline, WideAugBaseline, LesionAwareSampling"
+nnUNetTrainerLesionAwareSamplingPow_500epochs_full,5,1,8,keep (no redundant peer found),
+nnUNetTrainerLesionAwareSamplingPowCurriculum_500epochs_full,6,1,7,keep (no redundant peer found),
