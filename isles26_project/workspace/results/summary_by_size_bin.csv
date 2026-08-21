@@ -1,6 +1,16 @@
 ,,dice,dice,dice,dice,hd95_mm,hd95_mm,hd95_mm,hd95_mm,lesion_f1,lesion_f1,lesion_f1,lesion_f1,avd_mm3,avd_mm3,avd_mm3,avd_mm3,lesion_count_diff,lesion_count_diff,lesion_count_diff,lesion_count_diff
 ,,mean,std,median,count,mean,std,median,count,mean,std,median,count,mean,std,median,count,mean,std,median,count
 experiment,size_bin,,,,,,,,,,,,,,,,,,,,
+ensemble_Baseline+WideAugBaseline (ResEncM)+FocalTversky+LesionAwareSamplingPowCurriculum,large,0.8252,0.1124,0.8683,78,7.1534,7.6742,4.2426,78,0.6958,0.2507,0.6667,78,14519.5472,13641.1307,9228.5,78,2.2564,3.3708,1.0,78
+ensemble_Baseline+WideAugBaseline (ResEncM)+FocalTversky+LesionAwareSamplingPowCurriculum,medium,0.6325,0.2614,0.7417,84,16.8347,20.6076,6.7823,83,0.6523,0.2726,0.6667,84,3567.369,6155.7033,1892.7558,84,2.25,3.4983,1.0,84
+ensemble_Baseline+WideAugBaseline (ResEncM)+FocalTversky+LesionAwareSamplingPowCurriculum,small,0.5238,0.2968,0.5879,87,24.5907,24.8023,13.0978,84,0.6469,0.3256,0.6667,87,589.8758,889.3632,316.6199,87,1.2069,1.3737,1.0,87
+ensemble_WideAugBaseline+Baseline (ResEncM)+FocalTversky+LesionAwareSamplingPow,large,0.8306,0.1127,0.8708,78,6.7553,7.3164,4.1829,78,0.6976,0.2534,0.6667,78,13806.3712,12791.7816,9343.9906,78,2.1282,3.0679,1.0,78
+ensemble_WideAugBaseline+Baseline (ResEncM)+FocalTversky+LesionAwareSamplingPow,medium,0.6338,0.2616,0.736,84,18.3777,23.4387,6.8541,84,0.6729,0.2843,0.6667,84,3322.5042,5801.7383,1695.994,84,2.1548,3.7529,1.0,84
+ensemble_WideAugBaseline+Baseline (ResEncM)+FocalTversky+LesionAwareSamplingPow,small,0.528,0.2958,0.586,87,24.0274,24.0705,13.2761,84,0.6392,0.3224,0.6667,87,548.1293,809.5723,313.0,87,1.2529,1.4404,1.0,87
+nnUNetTrainerBaseline_1000epochs,empty,1.0,,1.0,1,,,,0,1.0,,1.0,1,0.0,,0.0,1,0.0,,0.0,1
+nnUNetTrainerBaseline_1000epochs,large,0.7993,0.1554,0.876,37,13.833,21.2825,5.0486,37,0.6371,0.2402,0.5714,37,9617.4174,8672.4951,7505.0,37,2.8378,6.0988,1.0,37
+nnUNetTrainerBaseline_1000epochs,medium,0.6013,0.2662,0.6175,40,22.2303,24.2759,15.7815,40,0.6545,0.2399,0.6667,40,2883.4033,3081.6878,1938.5,40,1.875,2.1023,1.0,40
+nnUNetTrainerBaseline_1000epochs,small,0.5817,0.2697,0.6939,41,22.8362,24.6097,13.1271,40,0.7076,0.2729,0.6667,41,571.8702,1107.2291,196.0,41,1.2195,1.275,1.0,41
 nnUNetTrainerBaseline_500epochs,empty,0.0,,0.0,1,,,,0,0.0,,0.0,1,36.0,,36.0,1,2.0,,2.0,1
 nnUNetTrainerBaseline_500epochs,large,0.8205,0.1149,0.8687,115,8.5624,11.5987,4.6822,115,0.6353,0.2669,0.6667,115,12538.3847,11123.5716,9793.9072,115,2.6522,4.4407,1.0,115
 nnUNetTrainerBaseline_500epochs,medium,0.623,0.2607,0.7131,124,19.2785,22.835,7.8406,124,0.643,0.2709,0.6667,124,3331.1923,5403.5405,1815.9328,124,2.1371,3.2965,1.0,124

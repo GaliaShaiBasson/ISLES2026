@@ -1,6 +1,9 @@
 ,dice,dice,dice,dice,hd95_mm,hd95_mm,hd95_mm,hd95_mm,lesion_f1,lesion_f1,lesion_f1,lesion_f1,avd_mm3,avd_mm3,avd_mm3,avd_mm3,lesion_count_diff,lesion_count_diff,lesion_count_diff,lesion_count_diff
 ,mean,std,median,count,mean,std,median,count,mean,std,median,count,mean,std,median,count,mean,std,median,count
 experiment,,,,,,,,,,,,,,,,,,,,
+ensemble_Baseline+WideAugBaseline (ResEncM)+FocalTversky+LesionAwareSamplingPowCurriculum,0.6549,0.2696,0.7685,249,16.4117,20.5195,6.1644,245,0.664,0.2857,0.6667,249,5957.8429,10287.3719,1562.9889,249,1.8876,2.9202,1.0,249
+ensemble_WideAugBaseline+Baseline (ResEncM)+FocalTversky+LesionAwareSamplingPow,0.6585,0.2696,0.7711,249,16.6217,21.2149,5.884,246,0.6689,0.2891,0.6667,249,5637.2472,9704.9705,1579.0,249,1.8313,2.9216,1.0,249
+nnUNetTrainerBaseline_1000epochs,0.6594,0.2565,0.7446,119,19.7819,23.6409,7.6811,117,0.6703,0.2524,0.6667,119,4156.5315,6404.0449,1346.9503,119,1.9328,3.7183,1.0,119
 nnUNetTrainerBaseline_500epochs,0.6515,0.2654,0.7476,368,18.5057,22.5476,6.8912,364,0.6354,0.2852,0.6667,368,5257.7241,8608.6192,1589.5,368,2.0272,3.2789,1.0,368
 nnUNetTrainerBaseline_500epochs__nnUNetResEncUNetMPlans,0.6515,0.2741,0.7588,368,18.0619,23.1478,6.0,363,0.6596,0.2962,0.6667,368,4851.3699,8525.3933,1428.2666,368,1.8804,3.1678,1.0,368
 nnUNetTrainerFocalTversky_500epochs,0.6352,0.2626,0.7207,368,19.1467,21.9344,7.6158,366,0.6324,0.2763,0.6667,368,6715.9698,11007.6937,2117.247,368,2.1793,3.1251,1.0,368
