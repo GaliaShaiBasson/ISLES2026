@@ -54,6 +54,17 @@ isles26_project/workspace/results/ensemble_test_tmp
 # !.gitkeep exception) still blocks every real file underneath.
 !isles26_project/workspace/final_holdout/
 
+# ...but workspace/results/final_holdout/ is a DIFFERENT directory -- the
+# computed metrics (results_id.csv/results_ood.csv from
+# scripts/run_final_holdout_evaluation.sh), not the hidden raw data itself.
+# **/final_holdout/ above also matched this path (same trailing directory
+# name), which would have silently blocked the one real deliverable this
+# whole hidden-holdout mechanism exists to produce. The raw data stays
+# hidden via workspace/final_holdout/ (images/ground truth, matched above);
+# these result CSVs are meant to be committed and reported.
+!isles26_project/workspace/results/final_holdout/
+!isles26_project/workspace/results/final_holdout/*.csv
+
 # Generated outputs
 results.csv
 results_baseline.csv
