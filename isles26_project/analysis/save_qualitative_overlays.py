@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Qualitative overlay figures: T1 scan + ground-truth / prediction / voxel-
+"""ne / voxel-
 level TP-FP-FN error map, for a handful of representative and failure cases.
 
 Expected input layout: nnU-Net's own raw-dataset naming --
