@@ -1,0 +1,10 @@
+{
+  "tag": "cc1_conn1",
+  "min_voxels": 1,
+  "connectivity": 1,
+  "selection_rule": "lowest val hd95_mean, dice_mean as tiebreaker",
+  "val_dice_mean": 0.6483,
+  "val_hd95_mean": 19.7015,
+  "val_dice_mean_raw_control": 0.6483,
+  "val_hd95_mean_raw_control": 19.7015
+}

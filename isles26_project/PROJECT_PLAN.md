@@ -338,7 +338,162 @@ same fold for every method (see the controlled-comparison rules above).
   dataset download** — not yet verified as of this writing; check before
   relying on case-discovery counts in the report.
 
-## Finalist-selection / ensembling-candidate analysis (2026-08-20)
+## Ensembling investigation concluded: no significant improvement over the best single model (2026-08-21)
+
+Closes out the "Finalist-selection" investigation below with real, final
+val + held-out-test numbers. **Bottom line: ensembling does not produce a
+statistically significant improvement over the single best model on this
+dataset — confirmed independently on val and on test_id/test_ood, across
+every metric and every size/split breakdown.** Report as a real
+negative/inconclusive finding for the Experiments section, same category as
+the connected-component post-processing "no-op wins" result above.
+
+**Code restructured first, at the user's explicit request** — `analysis/`
+now holds only read-only correlation/PCA scripts (twin probability-level
+scripts added: `voxel_probability_correlation.py`, `plot_voxel_probability_
+correlation.py`, `pca_probability_redundancy.py`, plus a shared
+`predval_dirs.py`), while `ensembling/` holds only real, expensive work
+(`ensemble_val.py` — build + score a chosen combo on val, no plotting;
+new `ensemble_test.py` — the one-time, deliberate held-out scoring step for
+a chosen combo, see below).
+
+**Two real bugs found and fixed while wiring this up:**
+- `predval_dir()`/new `predtest_dir()` needed a fallback: standard-plans
+  `Baseline` had its val probabilities in nnU-Net's automatic `validation/`
+  folder (never in `export_val_probabilities.sh`'s trainer list), and both
+  ResEncM-plans runs had their *test*-set probabilities sitting in the plain
+  `predTs/` folder (saved on the original predict call) rather than a
+  dedicated `predTs_prob/` export. Verified real (not stale): correct case
+  counts, correct `.npz` schema, newer than `checkpoint_final.pth`.
+- `score_combo()`'s per-case loop called `evaluate_case` with no exception
+  handling — one real geometry-mismatch case (`ATLAS_r032s013_ses1`) crashed
+  the *entire* combo-scoring run before this fix, instead of being skipped
+  like `compute_metrics.py`'s own CLI already does. Fixed to match.
+
+**Primary metric switched `hd95_mm` → `dice`, project-wide** (see
+`CLAUDE.md` "Primary metric switched to Dice" for the full why: Dice is
+always defined — HD95 is NaN on any empty-lesion case — lower-variance on a
+val/test set this size, and the metric every comparable report leads with).
+This **changed the recommended ensemble combo** from the 2026-08-20 pick
+below — re-ran `select_finalist_from_val.py`/`pca_model_redundancy.py`/
+`pca_probability_redundancy.py`/`plot_finalist_selection.py` under the new
+default and got real, different answers, not just relabeled ones:
+- New val ranking (dice): `WideAugBaseline (ResEncM)` #1 (0.6553),
+  `Baseline (ResEncM)` #2 (0.6550, statistically tied), `FocalTversky` #3,
+  `Baseline` #4, `WideAugBaseline` #5 ... `LesionAwareSamplingPowCurriculum`
+  #8 (0.6173) now beats `LesionAwareSamplingPow` #9 (0.6127) — a real flip
+  from the hd95_mm ranking, and consistent with what the voxel-probability
+  correlation already suggested (Curriculum was the more complementary of
+  the two, even under the old ranking).
+- Redundancy-cluster "keep" picks flip in **both** clusters under dice:
+  `WideAugBaseline (ResEncM)` now wins the ResEncM cluster (was `Baseline
+  (ResEncM)`); `Baseline` now wins the standard-plans cluster (was
+  `WideAugBaseline`).
+- Voxel-probability-correlation analysis is metric-independent, so it's
+  unchanged: max correlation found anywhere is still 0.937 (`Baseline` vs.
+  `WideAugBaseline`), all 9 trainers remain singletons at the r=0.95
+  redundancy cut — doesn't independently justify dropping anyone, but
+  doesn't contradict the case-Dice-based narrowing either.
+- **New recommended/tested combo: `Baseline + WideAugBaseline (ResEncM) +
+  FocalTversky + LesionAwareSamplingPowCurriculum`** (replaces the
+  2026-08-20 pick, `WideAugBaseline + Baseline(ResEncM) + FocalTversky +
+  LesionAwareSamplingPow`, below).
+
+**Real val-side scoring** (`ensemble_val.py`, all 7 combos — 6 pairs + the
+full 4-way average, real softmax-averaging + real metric scoring, not a
+proxy): best single model `WideAugBaseline (ResEncM)` (dice 0.6553); **no
+combo significantly beats it** (p = 0.14–0.97 across all 7); one combo
+(`WideAugBaseline (ResEncM)+LesionAwareSamplingPowCurriculum`) is
+significantly *worse* (p < 0.001). `workspace/results/finalist_selection/
+ensemble_summary_val.csv`.
+
+**Real held-out test scoring** (`ensembling/ensemble_test.py`, new script —
+one-time, deliberate; reuses existing single-model `results_test.csv` rows
+rather than re-predicting them; writes a report table broken down by
+overall / split (test_id, test_ood) / **size_bin (small, medium, large)** —
+size_bin matters as much as split here, per `docs/reference/`'s "Match
+Architecture to Pathology Size": small lesions are the case a generic
+pipeline is most likely to lose signal on, and "best pooled Dice" can hide
+"best where it's hardest"). Compared the new combo against `Baseline` and
+`WideAugBaseline (ResEncM)` (the primary-metric anchor, always included),
+249/250 held-out cases scored, real paired-bootstrap p-values (a two-sided
+bootstrap p-value was added to `paired_bootstrap_vs_top`, reused by both
+scripts):
+
+| breakdown | metric | ensemble | Baseline | WideAugBaseline (ResEncM) | p-value |
+|---|---|---|---|---|---|
+| overall (249) | dice | 0.6549 | 0.6530 | 0.6552 | 0.971 |
+| overall | hd95_mm | **16.41** | 17.94 | 17.09 | 0.787 |
+| overall | lesion_f1 | **0.664** | 0.637 | 0.657 | 0.483 |
+| test_id (120) | dice | 0.6360 | 0.6278 | 0.6393 | 0.429 |
+| test_ood (129) | dice | 0.6725 | 0.6764 | 0.6700 | 0.677 |
+| large (78) | dice | 0.8252 | **0.8325** | 0.8175 | 0.142 |
+| large | hd95_mm | **7.153** | 7.283 | 7.242 | 0.781 |
+| medium (84) | dice | 0.6325 | 0.6270 | **0.6326** | 0.958 |
+| medium | hd95_mm | **16.835** | 18.837 | 18.101 | 0.765 |
+| small (87) | dice | 0.5238 | 0.5172 | **0.5314** | 0.342 |
+| small | hd95_mm | **24.591** | 26.831 | 25.142 | 0.941 |
+| small | lesion_f1 | **0.647** | 0.627 | 0.643 | 0.801 |
+
+(full 18-row table, every metric x every breakdown, in `workspace/results/
+runs/ensemble_Baseline+WideAugBaseline (ResEncM)+FocalTversky+
+LesionAwareSamplingPowCurriculum/report_table.csv`)
+
+**No row anywhere reaches significance** (p ranges 0.14–0.97 across all 18
+rows). The one consistent pattern: the ensemble is numerically the best of
+the three on HD95 and lesion-F1 in **every single breakdown** (overall,
+both splits, and all three size bins) — but never enough to clear
+significance given the sample sizes (78–249 cases per breakdown). On Dice
+specifically there's no consistent winner (Baseline wins large,
+WideAugBaseline(ResEncM) wins medium and small, the ensemble wins none) —
+also with no significant separation. Even on the small-lesion subgroup
+specifically, the ensemble shows no Dice advantage over the single best
+model.
+
+**Final single-model choice for the report: `WideAugBaseline (ResEncM)` —
+best-ranked among a statistically tied group, not a clean outright winner.**
+Reasoning to carry into the Methods/Experiments writeup:
+- **In favor:** best point estimate on val (dice 0.6553); held up on the
+  real held-out test set (won pooled dice, 0.6552 vs. the ensemble's 0.6549
+  and `Baseline`'s 0.6530; won dice specifically on the medium and small
+  size bins); no ensemble combo — including one built specifically to try
+  to beat it — showed a significant improvement over it, on val or test.
+  It also stacks the two interventions with the clearest independent
+  motivation in this project (widened augmentation from the `wideaug` A/B,
+  and the ResEnc-M architecture upgrade) — a clean story for the report.
+- **Caveat to state explicitly, not bury:** on val it is **statistically
+  tied with 5 of the other 8 trainers** (`Baseline (ResEncM)`,
+  `FocalTversky`, `Baseline`, `WideAugBaseline` standard-plans,
+  `TverskyMild`) — only the 3 LesionAwareSampling variants are
+  significantly worse. So this is "best-ranked among a tied group," not
+  "significantly best" — report it that way.
+- **Cost caveat:** ResEnc-M is a materially larger/more expensive
+  architecture than the standard-plans baseline (see `CLAUDE.md` "Switch to
+  nnU-Net's ResEnc planner"). Plain `WideAugBaseline` (no ResEncM) is
+  statistically indistinguishable from it and much cheaper to train/run —
+  name it explicitly as the cheaper, equally-defensible alternative if
+  compute cost matters for the report's conclusions, rather than silently
+  defaulting to the pricier architecture on a non-significant point-estimate
+  margin.
+- **Metric caveat:** on HD95 and lesion-F1 specifically (not the primary
+  metric, but still reported), the 4-model ensemble was numerically ahead of
+  `WideAugBaseline (ResEncM)` in every single breakdown above (though never
+  significantly) — worth a sentence in the writeup if the report's framing
+  cares about lesion-detection completeness (lesion-F1) or worst-case
+  boundary error (HD95), not just Dice.
+
+**Next step: not yet decided — pending discussion** (e.g. whether to try
+the earlier-flagged Pow-vs-Curriculum swap as an ablation, whether this is
+enough to write up as the final ensembling result, or whether a genuinely
+different combo/method is worth one more real val-side check before
+closing this out).
+
+## Finalist-selection / ensembling-candidate analysis (2026-08-20) — SUPERSEDED, see entry above
+
+The recommended combo and hd95_mm-primary ranking below were superseded by
+the 2026-08-21 entry above once the primary metric switched to Dice. Kept
+as a historical record of what was concluded at the time, not retroactively
+rewritten.
 
 Ran `analysis/finalist_selection/select_finalist_from_val.py`,
 `analysis/finalist_selection/plot_finalist_selection.py`, and
@@ -402,27 +557,112 @@ scored against the best single model — run that (needs `predVal_prob/`
 exported per trainer first, via `export_val_probabilities.sh`) before
 finalizing which trainers actually go into the shipped ensemble.
 
+## Post-processing grid search rerun under Dice-primary selection: wideaug_resencm (2026-08-21)
+
+Closes out the "rerun under `--selection-metric dice_mean`" item that was
+still open in "Future work" below (now struck through there) — the primary
+metric switched from hd95_mm to Dice on 2026-08-20 (see `CLAUDE.md` "Primary
+metric switched to Dice"), so the original `baseline500` grid's "no-op wins"
+conclusion needed re-checking under Dice selection, not assumed to carry
+over. Run against `WideAugBaseline (ResEncM)`, the current best single model
+per the finalist-selection ranking above (not `baseline500` again).
+
+**Method, same discipline as the original grid** (`evaluation/
+postprocess_predictions.py` + `evaluation/summarize_postprocess_grid.py`,
+driven by `run_postprocess_grid.sh`): connected-component filtering swept
+over `min_voxels` x `connectivity`, selected by lowest val `dice_mean`
+(hd95_mean tiebreak) against the 119-case internal validation split only
+(`fold_0/validation` vs `labelsTr`) — never against `test_id`/`test_ood`
+during selection — then the one frozen winning combo applied exactly once
+to the held-out test set for a before/after row. Log:
+`workspace/logs/postprocess_grid_wideaug_resencm_20260821_003620.log`.
+Outputs: `workspace/predictions/postprocess_grid/wideaug_resencm/
+grid_summary_val.csv`, `selected_combo.json`,
+`test_final/results_{raw,cc15_conn2}_test.csv`.
+
+**Selected combo: `cc15_conn2`** (drop components <15 voxels, 18-connected).
+Same qualitative "no-op wins" shape as the original hd95-primary
+`baseline500` grid, now confirmed under Dice-primary selection too:
+
+| | val (n=119) Dice | val HD95 | val lesion F1 | test (n=249) Dice | test HD95 | test lesion F1 |
+|---|---|---|---|---|---|---|
+| raw (no-op) | 0.6553 | 20.006 | 0.651 | 0.6552 | 17.095 | 0.6570 |
+| **cc15_conn2 (selected)** | **0.6560** | 20.081 | 0.6843 | 0.6529 | 16.843 | **0.6927** |
+
+Val Dice improvement is +0.0007 — noise-level, same order of magnitude as
+every other combo in the grid (all 20+ combos land within ≤0.0007 Dice of
+the no-op; see `grid_summary_val.csv`). On the frozen test check, Dice
+actually goes the *other* way (-0.0023) while HD95 improves slightly
+(-0.25mm) and lesion F1 improves more (+0.036) — components small enough to
+prune are mostly spurious false-positive lesions, not volume that matters
+for Dice, so pruning them helps lesion-wise detection without moving the
+voxel-overlap metric either direction reliably.
+
+**Two illustrative cases (`test_final/results_{raw,cc15_conn2}_test.csv`,
+matched by `case_id`):**
+- **Helped:** `ATLAS_r050s001_ses1` — raw predicted 2 lesion components (1
+  true positive + 1 spurious ~10-voxel blob), lesion F1 0.667; after
+  filtering, only the true-positive component survives, Dice 0.737 -> 0.848
+  (+0.112) and lesion F1 0.667 -> 1.0. This is the mechanism the grid is
+  supposed to catch — a small phantom blob dragging both metrics down.
+- **Hurt (worst case in the whole test set):** `ATLAS_r053s042_ses1` — raw
+  predicted exactly 1 lesion component, smaller than the 15-voxel cutoff.
+  Filtering removes it entirely, leaving an empty prediction against a
+  non-empty ground truth: Dice 0.714 -> **0.0**, lesion F1 1.0 -> **0.0**.
+  This is the same failure mode flagged in the original `baseline500`
+  finding (`CLAUDE.md`/"Night one" entry below) — some small components are
+  genuine tiny lesions, not noise, and a size-only cutoff can't tell the
+  difference. 92 of 249 test cases changed at all under `cc15_conn2` (most
+  changes much smaller than these two extremes); this is the largest single
+  swing in either direction.
+
+**To be decided: whether to actually ship `cc15_conn2` post-processing, or
+report raw predictions as final.** Arguments either way, not yet resolved:
+- *For post-processing:* consistent, reproducible lesion-F1 gain (+0.033
+  val / +0.036 test) with a Dice cost inside the run-to-run noise band; if
+  the report's Discussion cares about false-positive lesion count (e.g.
+  clinical usability framing), this is a real, defensible improvement to
+  ship.
+- *Against:* the Dice movement is a coin flip in direction (+val, -test),
+  and the `r053s042` failure mode shows the tradeoff isn't free — the same
+  cutoff that removes phantom blobs will occasionally remove a real,
+  correctly-detected small lesion outright (Dice/F1 -> 0 for that case).
+  Given Dice is now the project's primary metric (see `CLAUDE.md`), and the
+  grid was explicitly re-run to check exactly this, a defensible default is
+  "no-op" (report post-processing as an investigated-and-rejected step,
+  same framing as the original `baseline500` finding) unless lesion-wise
+  detection quality is independently important to the report's framing.
+- Not yet run: the equivalent Dice-primary rerun for `baseline500` itself
+  (the original grid target) — only `wideaug_resencm` has been redone under
+  the new selection metric so far. Worth doing before finalizing the
+  report's post-processing section, for completeness across conditions, not
+  because the conclusion is expected to differ.
+
 ## Future work (beyond this report)
 
-- **Rerun the connected-component post-processing grid search under
-  `--selection-metric dice_mean`** (planned 2026-08-21) — the project's
-  primary metric switched from hd95_mm to Dice on 2026-08-20 (see
-  `CLAUDE.md` "Primary metric switched to Dice"); the original grid's
-  "no-op wins" conclusion was reached under hd95_mean-primary selection
-  specifically. The original numbers (dice moved ≤0.0004 across all 20
-  combos) suggest the conclusion likely still holds, but this needs an
-  actual rerun to confirm, not an assumption. Same val set as before
-  (`fold_0/validation/` vs. `labelsTr`) — never test_id/test_ood.
+- ~~Rerun the connected-component post-processing grid search under
+  `--selection-metric dice_mean`~~ **Done for `wideaug_resencm`, 2026-08-21**
+  — see the dedicated section above. `baseline500`'s own Dice-primary rerun
+  is still outstanding (noted in that section's last bullet).
+- **`baseline500`'s own Dice-primary post-processing grid rerun** — still
+  outstanding; only `wideaug_resencm` has been redone under
+  `--selection-metric dice_mean` so far (see the dedicated section above).
+  Same val-only discipline applies (`fold_0/validation/` vs. `labelsTr`,
+  never test_id/test_ood).
+- **Decide whether to ship `cc15_conn2` post-processing or report raw** —
+  see "To be decided" in the post-processing section above; not yet
+  resolved.
 - **Per-condition threshold tuning** (0.5 → best-found, via
   `dice_vs_threshold.py`) and probability-calibration inspection (via
   `probability_histogram.py`) across all 7 conditions, now that
   `predTs_prob/` exists for each — natural next exploratory pass once the
   report's fixed deliverables are locked, since it's the same probability
   data prediction ensembling will need.
-- **Prediction ensembling** — see the "Finalist-selection /
-  ensembling-candidate analysis" section above for the current
-  recommendation and what's still pending (real voxel-probability
-  confirmation via `ensembling/ensemble_val.py`).
+- **Prediction ensembling — concluded (2026-08-21).** See "Ensembling
+  investigation concluded" above: no statistically significant improvement
+  over the single best model, confirmed on both val and held-out test.
+  Report as a real negative/inconclusive finding; next step (if any) is a
+  discussed-not-decided ablation, not a rerun of what's already confirmed.
 - **Domain-adversarial training** (gradient-reversal domain classifier on
   encoder features) — only worth revisiting if the `test_id`/`test_ood` gap
   is still meaningful after the `wideaug` result. See `CLAUDE.md` for the

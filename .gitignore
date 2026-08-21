@@ -84,6 +84,29 @@ isles26_project_simplified/workspace/*.log
 !isles26_project/workspace/sample_run/evaluation/summary_by_experiment.csv
 !isles26_project/workspace/sample_run/evaluation/summary_by_size_bin.csv
 
+# Post-processing grid search summaries only -- the blanket postprocess_grid/
+# ignore above (~137M: per-combo filtered NIfTI masks plus one config.json +
+# postprocess_summary.csv per combo, all fully regeneratable from
+# run_postprocess_grid.sh + the frozen predictions) still applies to
+# everything except the handful of files below. Un-ignoring a file nested
+# under an ignored directory requires whitelisting every directory level on
+# the way down too (git won't re-include a file whose parent dir is
+# excluded), so this is deliberately a "reopen, then re-close everything
+# except..." pair per level, not a single-line exception. Net effect: only
+# grid_summary_val.csv (all combos scored on val), selected_combo.json (the
+# winner + selection rule), and test_final/results_*.csv (the frozen
+# before/after test rows) stay tracked -- not grid_manifest.csv, not any
+# per-combo config.json/postprocess_summary.csv, not val_search/ at all. See
+# PROJECT_PLAN.md "Post-processing grid search" entries.
+!isles26_project/workspace/predictions/postprocess_grid/
+!isles26_project/workspace/predictions/postprocess_grid/*/
+isles26_project/workspace/predictions/postprocess_grid/*/*
+!isles26_project/workspace/predictions/postprocess_grid/*/grid_summary_val.csv
+!isles26_project/workspace/predictions/postprocess_grid/*/selected_combo.json
+!isles26_project/workspace/predictions/postprocess_grid/*/test_final/
+isles26_project/workspace/predictions/postprocess_grid/*/test_final/*
+!isles26_project/workspace/predictions/postprocess_grid/*/test_final/results_*.csv
+
 # Python
 __pycache__/
 *.pyc
